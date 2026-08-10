@@ -1,0 +1,10 @@
+# Code ownership — DEV-IP-001…002
+# Replace these placeholder handles with real GitHub usernames/teams once the
+# repo is pushed to GitHub and the team from Section 5 (Team & Ownership) is
+# confirmed. Until then, every PR requires review from @ipacgs/platform-owners.
+
+*                       @ipacgs/platform-owners
+
+/infra/                 @ipacgs/platform-owners
+/services/api/src/ipacgs/models/   @ipacgs/framework-authority
+/services/api/src/ipacgs/api/      @ipacgs/platform-owners
