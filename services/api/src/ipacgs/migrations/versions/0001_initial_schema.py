@@ -33,7 +33,9 @@ def upgrade() -> None:
             nullable=False,
             server_default="active",
         ),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.Column("created_by", sa.String(), nullable=False),
     )
 
@@ -49,7 +51,9 @@ def upgrade() -> None:
         sa.Column("incorporation_date", sa.Date()),
         sa.Column("organisation_type", sa.String(100)),
         sa.Column("is_own_tenant_entity", sa.Boolean(), nullable=False, server_default=sa.false()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.Column("created_by", sa.String(), nullable=False),
         sa.Column(
             "updated_at",
@@ -71,7 +75,9 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column(
-            "matched_organisation_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("organisations.id")
+            "matched_organisation_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("organisations.id"),
         ),
         sa.Column("match_confidence", sa.Float()),
         sa.Column(
@@ -88,9 +94,15 @@ def upgrade() -> None:
         ),
         sa.Column("full_name", sa.String(255), nullable=False),
         sa.Column("email", sa.String(255)),
-        sa.Column("primary_organisation_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("organisations.id")),
+        sa.Column(
+            "primary_organisation_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("organisations.id"),
+        ),
         sa.Column("entra_object_id", sa.String(36), unique=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.Column("created_by", sa.String(), nullable=False),
         sa.Column(
             "updated_at",
@@ -114,7 +126,9 @@ def upgrade() -> None:
         sa.Column("actor_object_id", sa.String(36), nullable=False),
         sa.Column(
             "action",
-            sa.Enum("create", "change", "delete", "approve", "reject", "export", name="audit_action"),
+            sa.Enum(
+                "create", "change", "delete", "approve", "reject", "export", name="audit_action"
+            ),
             nullable=False,
         ),
         sa.Column("entity_type", sa.String(100), nullable=False),

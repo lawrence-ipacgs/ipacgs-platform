@@ -16,8 +16,9 @@ of "this specific record's preparer."
 from __future__ import annotations
 
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from fastapi import Depends, HTTPException, status
@@ -56,13 +57,13 @@ def _authority_urls() -> tuple[str, str]:
 async def _get_jwks() -> list[dict[str, Any]]:
     now = time.monotonic()
     if _JWKS_CACHE["keys"] is not None and now - _JWKS_CACHE["fetched_at"] < _JWKS_TTL_SECONDS:
-        return _JWKS_CACHE["keys"]
+        return cast(list[dict[str, Any]], _JWKS_CACHE["keys"])
 
     jwks_url, _ = _authority_urls()
     async with httpx.AsyncClient(timeout=5.0) as client:
         response = await client.get(jwks_url)
         response.raise_for_status()
-    keys = response.json()["keys"]
+    keys = cast(list[dict[str, Any]], response.json()["keys"])
     _JWKS_CACHE["keys"] = keys
     _JWKS_CACHE["fetched_at"] = now
     return keys
@@ -109,7 +110,7 @@ async def get_current_user(
     )
 
 
-def require_roles(*allowed_roles: str):
+def require_roles(*allowed_roles: str) -> Callable[[CurrentUser], Awaitable[CurrentUser]]:
     """FastAPI dependency factory — `Depends(require_roles("AssuranceLead"))`.
     RBAC only; does not itself enforce maker-checker (see below)."""
 

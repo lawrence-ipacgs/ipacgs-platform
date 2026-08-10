@@ -40,6 +40,14 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+# B008: FastAPI's Depends() is meant to be called in argument defaults —
+# that's the framework's own documented pattern, not the bug bugbear assumes.
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# Alembic migration files follow Alembic's own generated-script conventions
+# (Union/Sequence from typing) — not worth fighting the tool that writes them.
+"src/ipacgs/migrations/versions/*.py" = ["UP035", "UP007"]
 
 [tool.mypy]
 python_version = "3.11"

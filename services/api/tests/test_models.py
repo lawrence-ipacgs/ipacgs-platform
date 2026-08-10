@@ -28,7 +28,9 @@ async def test_tenant_and_organisation_round_trip(db_session: AsyncSession) -> N
     db_session.add(org)
     await db_session.commit()
 
-    result = await db_session.execute(select(Organisation).where(Organisation.tenant_id == tenant.id))
+    result = await db_session.execute(
+        select(Organisation).where(Organisation.tenant_id == tenant.id)
+    )
     fetched = result.scalar_one()
     assert fetched.legal_name == "KMI Africa Group"
     assert fetched.is_own_tenant_entity is True
@@ -39,7 +41,9 @@ async def test_tenant_and_organisation_round_trip(db_session: AsyncSession) -> N
 
 async def test_record_audit_event_is_queryable(db_session: AsyncSession) -> None:
     tenant_id = uuid.uuid4()
-    db_session.add(Tenant(id=tenant_id, name="Test Tenant", slug=f"test-{tenant_id}", created_by="seed"))
+    db_session.add(
+        Tenant(id=tenant_id, name="Test Tenant", slug=f"test-{tenant_id}", created_by="seed")
+    )
     await db_session.flush()
 
     entity_id = uuid.uuid4()

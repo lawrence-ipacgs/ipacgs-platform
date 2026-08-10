@@ -7,6 +7,7 @@ event schema ever needs to grow (e.g. adding a reason-code field later).
 """
 
 import uuid
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,8 +23,8 @@ async def record_audit_event(
     entity_type: str,
     entity_id: uuid.UUID,
     correlation_id: uuid.UUID,
-    before_values: dict | None = None,
-    after_values: dict | None = None,
+    before_values: dict[str, Any] | None = None,
+    after_values: dict[str, Any] | None = None,
 ) -> AuditEvent:
     """Adds the event to `session` but does not commit — call within the same
     transaction as the change being audited, so the audit record and the
