@@ -1,10 +1,11 @@
 # Code ownership — DEV-IP-001…002
-# Replace these placeholder handles with real GitHub usernames/teams once the
-# repo is pushed to GitHub and the team from Section 5 (Team & Ownership) is
-# confirmed. Until then, every PR requires review from @ipacgs/platform-owners.
+# Pointed at @lawrence-ipacgs directly for now (repo has one contributor).
+# Replace with real teams once Section 5's (Team & Ownership) roles are
+# staffed — e.g. an @ipacgs/framework-authority team for the model owner
+# distinct from whoever owns platform/infra, per that section's split.
 
-*                       @ipacgs/platform-owners
+*                       @lawrence-ipacgs
 
-/infra/                 @ipacgs/platform-owners
-/services/api/src/ipacgs/models/   @ipacgs/framework-authority
-/services/api/src/ipacgs/api/      @ipacgs/platform-owners
+/infra/                 @lawrence-ipacgs
+/services/api/src/ipacgs/models/   @lawrence-ipacgs
+/services/api/src/ipacgs/api/      @lawrence-ipacgs
