@@ -6,6 +6,9 @@ param projectPrefix string
 param environment string
 param tags object
 param platformAdminObjectId string
+@description('User (an individual account, no admin rights needed to obtain your own object ID) or Group (needs Groups Administrator to create). Defaults to User so this does not depend on tenant permissions you may not have yet.')
+@allowed(['User', 'Group'])
+param platformAdminPrincipalType string = 'User'
 param workspaceId string
 
 // Key Vault names are globally unique and capped at 24 chars.
@@ -29,16 +32,17 @@ resource vault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   }
 }
 
-// "Key Vault Administrator" built-in role — full data-plane control for the
-// platform admin group. Application services get narrower "Key Vault Secrets
-// User" assignments added when each service's managed identity is created.
+// "Key Vault Administrator" built-in role — full data-plane control for
+// whoever's standing up this environment. Application services get narrower
+// "Key Vault Secrets User" assignments added when each service's managed
+// identity is created.
 resource adminRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(vault.id, platformAdminObjectId, 'KeyVaultAdministrator')
   scope: vault
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '00482a5a-887f-4fb3-b363-3b7fe8e74483')
     principalId: platformAdminObjectId
-    principalType: 'Group'
+    principalType: platformAdminPrincipalType
   }
 }
 

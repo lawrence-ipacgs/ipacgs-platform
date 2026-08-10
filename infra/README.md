@@ -31,14 +31,30 @@ requirements point elsewhere.
    az account set --subscription "<your subscription name or ID>"
    ```
 
-2. **Get the platform-admin Entra ID group's object ID** and put it in
-   `main.dev.bicepparam` in place of the placeholder GUID:
+   If `az login` fails with **"Your sign-in was successful but you don't
+   have permission to access this resource"**, that's Entra ID blocking the
+   Azure CLI application itself (a common tenant restriction) — not a
+   subscription/RBAC problem, and not something a CLI retry fixes. Two ways
+   around it without needing a Global Administrator:
+   - **Azure Cloud Shell** (the `>_` icon in portal.azure.com, or
+     shell.azure.com) inherits your portal session instead of going through
+     the restricted app — often works even when `az login` doesn't. Run the
+     rest of this walkthrough from there instead.
+   - Otherwise, someone with Cloud Application Administrator rights needs to
+     check **Entra admin center → Enterprise Applications → "Azure CLI" →
+     Properties → "Assignment required?"** and either add your account or
+     turn that off.
+
+2. **Get your own object ID** and put it in `main.dev.bicepparam` in place
+   of the placeholder GUID — `platformAdminPrincipalType` already defaults
+   to `User`, so this works without any Groups Administrator role:
    ```bash
-   az ad group show --group "IPACGS Platform Admins" --query id -o tsv
+   az ad signed-in-user show --query id -o tsv
    ```
-   If that group doesn't exist yet, create it first (`az ad group create`) —
-   don't point this at an individual's object ID; it should be a group so
-   membership can change without a redeploy.
+   A real "IPACGS Platform Admins" group is worth creating once someone has
+   the rights to (`az ad group create`), and prod's `.bicepparam` already
+   expects one (`platformAdminPrincipalType = 'Group'`) — but nothing about
+   dev/test depends on that existing first.
 
 3. **Generate a Postgres admin password** and keep it somewhere real (a
    password manager, not a note) — you'll need it again for the connection

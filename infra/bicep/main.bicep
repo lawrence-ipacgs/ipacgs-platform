@@ -23,8 +23,12 @@ param location string = 'southafricanorth'
 @description('Short project prefix used in every resource name.')
 param projectPrefix string = 'ipacgs'
 
-@description('Object ID of the Entra ID group/user that receives initial Key Vault + data admin access. Required — no default, so a real value must be supplied per environment.')
+@description('Object ID of the Entra ID user or group that receives initial Key Vault + data admin access. Required — no default, so a real value must be supplied per environment.')
 param platformAdminObjectId string
+
+@description('Whether platformAdminObjectId is a User or a Group. Defaults to User — your own account, no Groups Administrator role required — since a group can be introduced later without touching anything downstream of this parameter.')
+@allowed(['User', 'Group'])
+param platformAdminPrincipalType string = 'User'
 
 @description('Postgres administrator login name.')
 param postgresAdminLogin string = 'ipacgsadmin'
@@ -59,6 +63,7 @@ module foundation 'modules/foundation.bicep' = {
     projectPrefix: projectPrefix
     tags: tags
     platformAdminObjectId: platformAdminObjectId
+    platformAdminPrincipalType: platformAdminPrincipalType
     postgresAdminLogin: postgresAdminLogin
     postgresAdminPassword: postgresAdminPassword
     apiImageTag: apiImageTag

@@ -5,6 +5,7 @@ param location string
 param projectPrefix string
 param tags object
 param platformAdminObjectId string
+param platformAdminPrincipalType string
 param postgresAdminLogin string
 
 @secure()
@@ -35,6 +36,7 @@ module keyVault 'keyvault.bicep' = {
     environment: environment
     tags: tags
     platformAdminObjectId: platformAdminObjectId
+    platformAdminPrincipalType: platformAdminPrincipalType
     workspaceId: logAnalytics.outputs.workspaceId
   }
 }
