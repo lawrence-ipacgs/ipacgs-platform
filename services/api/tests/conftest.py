@@ -28,8 +28,13 @@ def _event_loop_policy():
     yield policy
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 async def _schema() -> AsyncGenerator[None, None]:
+    """NOT autouse — only tests that actually request `db_session` or
+    `client` pay the cost of a real Postgres connection. Pure-logic tests
+    like test_security.py's maker-checker tests must be able to run with no
+    database reachable at all; a suite where every test secretly requires
+    infrastructure it doesn't use isn't one people run locally before pushing."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
@@ -38,13 +43,13 @@ async def _schema() -> AsyncGenerator[None, None]:
 
 
 @pytest.fixture
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
+async def db_session(_schema: None) -> AsyncGenerator[AsyncSession, None]:
     async with async_session_factory() as session:
         yield session
 
 
 @pytest.fixture
-async def client() -> AsyncGenerator[AsyncClient, None]:
+async def client(_schema: None) -> AsyncGenerator[AsyncClient, None]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
