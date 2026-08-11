@@ -1,6 +1,11 @@
 // Holds the API's container images between CI build and Container Apps deploy.
 param location string
+// minLength constraints here (not just relying on main.bicep's own) are what
+// let Bicep prove registryName can't fall below ACR's 5-char minimum —
+// without them the linter has to assume both could be empty.
+@minLength(3)
 param projectPrefix string
+@minLength(3)
 param environment string
 param tags object
 

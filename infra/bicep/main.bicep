@@ -21,6 +21,7 @@ param environment string
 param location string = 'southafricanorth'
 
 @description('Short project prefix used in every resource name.')
+@minLength(3)
 param projectPrefix string = 'ipacgs'
 
 @description('Object ID of the Entra ID user or group that receives initial Key Vault + data admin access. Required — no default, so a real value must be supplied per environment.')
