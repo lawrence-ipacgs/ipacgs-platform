@@ -25,8 +25,16 @@ resource vault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableSoftDelete: true
     softDeleteRetentionInDays: 90
     enablePurgeProtection: environment == 'prod' ? true : null
+    // RBAC is what actually gates access here (see adminRoleAssignment
+    // below) — this network ACL is a second layer on top of that, not the
+    // only one. Locking it to 'Deny' uniformly meant no operator could ever
+    // reach the vault to manage a secret manually (Cloud Shell's public IP
+    // doesn't count as a trusted Azure service, despite running inside
+    // Azure) without a temporary manual bypass every time. Same dev/test-
+    // loose, prod-strict split already used for Postgres HA and storage
+    // redundancy elsewhere in this module set.
     networkAcls: {
-      defaultAction: 'Deny'
+      defaultAction: environment == 'prod' ? 'Deny' : 'Allow'
       bypass: 'AzureServices'
     }
   }
