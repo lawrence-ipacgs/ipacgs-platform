@@ -70,9 +70,13 @@ jobs:
       - name: Static security scan (bandit)
         run: bandit -r src -ll
       - name: Dependency vulnerability scan (pip-audit)
+        # --skip-editable: without it, pip-audit tries to look up
+        # ipacgs-api itself (installed via `pip install -e .` above) on
+        # PyPI and fails, since it's our own private package, not a
+        # published one — not a real dependency to audit.
         run: |
           pip install pip-audit
-          pip-audit --strict
+          pip-audit --strict --skip-editable
 
   build:
     needs: [lint, test]
