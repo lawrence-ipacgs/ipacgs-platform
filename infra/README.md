@@ -114,37 +114,51 @@ container image or its environment variables.
 `.github/workflows/release-dev.yml` builds and deploys the API image on
 every push to `main`. It authenticates to Azure via OIDC — GitHub issues a
 short-lived token per run, Azure trusts it because of a federated
-credential, and no client secret is ever stored in GitHub. One-time setup,
-from Cloud Shell (same account that ran the Bicep deploy):
+credential, and no client secret is ever stored in GitHub.
+
+The federated credential lives on a **user-assigned managed identity**, not
+an Entra ID app registration. `az ad app create` hit "Insufficient
+privileges to complete the operation" on this tenant — a different, more
+restricted permission (Graph API app-creation rights) than the "Azure CLI"
+enterprise-app block worked around earlier. A managed identity is an ARM
+resource, gated by ordinary resource-group RBAC (Contributor) rather than
+Entra ID directory permissions, so it doesn't hit that wall — and
+`azure/login@v2` in the workflow authenticates identically either way, so
+nothing in `release-dev.yml` cares which kind of identity's `client-id`
+it's given. One-time setup, from Cloud Shell:
 
 ```bash
-# 1. App registration + service principal
-APP_ID=$(az ad app create --display-name "ipacgs-github-actions-dev" --query appId -o tsv)
-az ad sp create --id "$APP_ID"
+# 1. The identity itself — an ARM resource, needs RG Contributor, which
+#    the account that ran the Bicep deploy already has.
+az identity create --name id-ipacgs-github-actions-dev --resource-group rg-ipacgs-dev
 
-# 2. Federated credential — trusts GitHub Actions runs from this repo's
-#    main branch specifically, nothing broader.
-az ad app federated-credential create --id "$APP_ID" --parameters '{
-  "name": "github-actions-main",
-  "issuer": "https://token.actions.githubusercontent.com",
-  "subject": "repo:lawrence-ipacgs/ipacgs-platform:ref:refs/heads/main",
-  "audiences": ["api://AzureADTokenExchange"]
-}'
+CLIENT_ID=$(az identity show --name id-ipacgs-github-actions-dev --resource-group rg-ipacgs-dev --query clientId -o tsv)
+PRINCIPAL_ID=$(az identity show --name id-ipacgs-github-actions-dev --resource-group rg-ipacgs-dev --query principalId -o tsv)
+
+# 2. Federated credential — directly on the managed identity, trusts
+#    GitHub Actions runs from this repo's main branch specifically,
+#    nothing broader.
+az identity federated-credential create \
+  --name github-actions-main \
+  --identity-name id-ipacgs-github-actions-dev \
+  --resource-group rg-ipacgs-dev \
+  --issuer "https://token.actions.githubusercontent.com" \
+  --subject "repo:lawrence-ipacgs/ipacgs-platform:ref:refs/heads/main" \
+  --audiences "api://AzureADTokenExchange"
 
 # 3. Role assignments — AcrPush on the registry, Container Apps Contributor
 #    on the resource group. Nothing broader (not subscription-level, not
 #    plain Contributor) than what building and deploying actually needs.
-SP_OBJECT_ID=$(az ad sp show --id "$APP_ID" --query id -o tsv)
 ACR_ID=$(az acr show --name cripacgsdev --resource-group rg-ipacgs-dev --query id -o tsv)
 RG_ID=$(az group show --name rg-ipacgs-dev --query id -o tsv)
 
-az role assignment create --assignee-object-id "$SP_OBJECT_ID" \
+az role assignment create --assignee-object-id "$PRINCIPAL_ID" \
   --assignee-principal-type ServicePrincipal --role "AcrPush" --scope "$ACR_ID"
-az role assignment create --assignee-object-id "$SP_OBJECT_ID" \
+az role assignment create --assignee-object-id "$PRINCIPAL_ID" \
   --assignee-principal-type ServicePrincipal --role "Container Apps Contributor" --scope "$RG_ID"
 
 # 4. Values for the next step
-echo "AZURE_CLIENT_ID:       $APP_ID"
+echo "AZURE_CLIENT_ID:       $CLIENT_ID"
 echo "AZURE_TENANT_ID:       $(az account show --query tenantId -o tsv)"
 echo "AZURE_SUBSCRIPTION_ID: $(az account show --query id -o tsv)"
 ```
@@ -152,11 +166,7 @@ echo "AZURE_SUBSCRIPTION_ID: $(az account show --query id -o tsv)"
 Then add those three as **repository secrets** (Settings → Secrets and
 variables → Actions → New repository secret) named exactly
 `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` — the
-workflow reads them by those names. If `az ad app create` fails with a
-permissions error, that's a different Entra ID restriction (Graph API
-app-creation rights) than the "Azure CLI" enterprise-app block worked
-around above — same category of problem, likely needs the same kind of
-admin escalation if it comes up.
+workflow reads them by those names.
 
 ## App registration (Entra ID) — not yet in Bicep
 
