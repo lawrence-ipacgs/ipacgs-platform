@@ -138,12 +138,35 @@ PRINCIPAL_ID=$(az identity show --name id-ipacgs-github-actions-dev --resource-g
 # 2. Federated credential — directly on the managed identity, trusts
 #    GitHub Actions runs from this repo's main branch specifically,
 #    nothing broader.
+#
+#    The subject must be an EXACT string match against what GitHub's OIDC
+#    token actually presents — Azure does no wildcarding or normalization.
+#    This org has GitHub's "use stable subject claims" behaviour turned on,
+#    which inserts the org's and repo's numeric database IDs into the
+#    subject (repo:OWNER@ORG_ID/REPO@REPO_ID:ref:...) instead of the plain
+#    OWNER/REPO slugs — it exists so a subject can't be silently hijacked
+#    by renaming a repo/org into a vacated slug later. Don't assume the
+#    plain-slug form is what a run will actually present: pull the exact
+#    string from a failed azure/login@v2 step's "Federated token details"
+#    log line (it prints the subject claim even on failure) and use that
+#    verbatim. For this repo it's:
+#      repo:lawrence-ipacgs@315389971/ipacgs-platform@1329852884:ref:refs/heads/main
 az identity federated-credential create \
   --name github-actions-main \
   --identity-name id-ipacgs-github-actions-dev \
   --resource-group rg-ipacgs-dev \
   --issuer "https://token.actions.githubusercontent.com" \
-  --subject "repo:lawrence-ipacgs/ipacgs-platform:ref:refs/heads/main" \
+  --subject "repo:lawrence-ipacgs@315389971/ipacgs-platform@1329852884:ref:refs/heads/main" \
+  --audiences "api://AzureADTokenExchange"
+
+# If the credential already exists with the wrong subject (as it will the
+# first time this bites), update it in place rather than re-running create:
+az identity federated-credential update \
+  --name github-actions-main \
+  --identity-name id-ipacgs-github-actions-dev \
+  --resource-group rg-ipacgs-dev \
+  --issuer "https://token.actions.githubusercontent.com" \
+  --subject "repo:lawrence-ipacgs@315389971/ipacgs-platform@1329852884:ref:refs/heads/main" \
   --audiences "api://AzureADTokenExchange"
 
 # 3. Role assignments — AcrPush on the registry, Container Apps Contributor
