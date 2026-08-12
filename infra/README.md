@@ -58,18 +58,26 @@ requirements point elsewhere.
 
 3. **Generate a Postgres admin password** and keep it somewhere real (a
    password manager, not a note) — you'll need it again for the connection
-   string in step 5:
+   string in step 5. Export it as an environment variable; the `.bicepparam`
+   files read it via `readEnvironmentVariable('POSTGRES_ADMIN_PASSWORD')`
+   rather than taking it as a separate CLI override — `.bicepparam` files
+   are validated as a complete, self-contained set of parameters, so
+   `--parameters main.dev.bicepparam --parameters postgresAdminPassword=...`
+   does **not** merge the way a classic JSON parameters file would (fails
+   with `BCP258`):
    ```bash
-   POSTGRES_ADMIN_PASSWORD=$(openssl rand -base64 24)
+   export POSTGRES_ADMIN_PASSWORD=$(openssl rand -base64 24)
    ```
+   If you start a new shell session (including a fresh Cloud Shell session
+   after it recycles), re-export this before deploying again — it doesn't
+   persist on its own.
 
 4. **Validate before deploying:**
    ```bash
    az deployment sub what-if \
      --location southafricanorth \
      --template-file main.bicep \
-     --parameters main.dev.bicepparam \
-     --parameters postgresAdminPassword=$POSTGRES_ADMIN_PASSWORD
+     --parameters main.dev.bicepparam
    ```
 
 5. **Deploy:**
@@ -77,8 +85,7 @@ requirements point elsewhere.
    az deployment sub create \
      --location southafricanorth \
      --template-file main.bicep \
-     --parameters main.dev.bicepparam \
-     --parameters postgresAdminPassword=$POSTGRES_ADMIN_PASSWORD
+     --parameters main.dev.bicepparam
    ```
 
 ## Secrets

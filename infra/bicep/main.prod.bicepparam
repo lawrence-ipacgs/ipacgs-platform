@@ -11,7 +11,10 @@ param platformAdminObjectId = '00000000-0000-0000-0000-000000000000'
 param platformAdminPrincipalType = 'Group'
 
 param postgresAdminLogin = 'ipacgsadmin'
-// postgresAdminPassword passed at deploy time, from a dedicated prod secret
-// store (not the same value as dev/test) — see main.dev.bicepparam's note.
+// Read from the environment, not hardcoded — see main.dev.bicepparam's note
+// on why this can't be a separate --parameters CLI override (BCP258).
+// Source this from a dedicated prod secret store, not the same value as
+// dev/test's POSTGRES_ADMIN_PASSWORD.
+param postgresAdminPassword = readEnvironmentVariable('POSTGRES_ADMIN_PASSWORD')
 
 param apiImageTag = 'placeholder'
