@@ -1,0 +1,77 @@
+name: Release (dev)
+
+# Builds the API image and deploys it to the dev Container App, replacing
+# whatever's currently running there. Triggers on push to main — by the
+# time a commit lands there, ci.yml's checks already passed as a branch-
+# protection requirement on the PR, so this doesn't re-run them; it's the
+# release step ci.yml's own header comment says isn't built yet.
+#
+# Authenticates via OIDC — no client secret stored anywhere. See
+# infra/README.md § Release pipeline (OIDC setup) for the one-time Azure
+# setup this depends on: an app registration, a federated credential
+# trusting this repo's GitHub Actions runs, and two role assignments
+# (AcrPush on the registry, Container Apps Contributor on the resource
+# group) — nothing broader than that.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: rg-ipacgs-dev
+  REGISTRY_NAME: cripacgsdev
+  CONTAINER_APP_NAME: ca-ipacgs-api-dev
+
+jobs:
+  release-dev:
+    runs-on: ubuntu-latest
+    environment: dev
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push the image
+        # Built inside ACR itself, not on the runner — no Docker daemon
+        # setup needed, and the runner never holds a registry credential
+        # more powerful than "trigger a build" (az acr build uses the same
+        # OIDC-derived token from the login step above).
+        run: |
+          az acr build \
+            --registry "$REGISTRY_NAME" \
+            --image "ipacgs-api:${{ github.sha }}" \
+            --image "ipacgs-api:latest" \
+            .
+
+      - name: Deploy the new image
+        run: |
+          az containerapp update \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$REGISTRY_NAME.azurecr.io/ipacgs-api:${{ github.sha }}"
+
+      - name: Confirm the new revision is actually healthy
+        # A deploy that "succeeds" but serves a crashing container isn't a
+        # successful release — check the thing Epic 0 built for exactly
+        # this purpose (/healthz) before calling this workflow green.
+        run: |
+          FQDN=$(az containerapp show \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "Checking https://$FQDN/healthz"
+          curl --fail --silent --show-error --retry 6 --retry-delay 10 --retry-connrefused \
+            "https://$FQDN/healthz"

@@ -1,8 +1,10 @@
 name: CI
 
 # DEV-CICD-003 — build, lint, test and security-scan gates. Nothing in this
-# workflow deploys anywhere; it's the "does this PR pass" gate, not the
-# release pipeline (which doesn't exist yet — see infra/README.md).
+# workflow deploys anywhere; it's the "does this PR pass" gate. The release
+# pipeline is release-dev.yml, which runs after a commit lands on main —
+# by which point these checks already passed as a branch-protection
+# requirement on the PR, so it doesn't re-run them.
 
 on:
   pull_request:
@@ -86,10 +88,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build container image
-        # Confirms the image builds; does not push. Pushing to ACR needs
-        # OIDC federation set up between this repo and the registry created
-        # in infra/bicep/modules/container-registry.bicep — a deliberate
-        # follow-up once there's a real environment to push to, not before.
+        # Fast PR-time smoke check — confirms the image builds, does not
+        # push anywhere. release-dev.yml does the real build-and-push (via
+        # az acr build, inside ACR) once a commit reaches main.
         run: docker build -t ipacgs-api:ci .
 
   bicep-validate:

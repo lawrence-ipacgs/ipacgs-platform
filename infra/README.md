@@ -1,9 +1,12 @@
 # Infrastructure — Epic 0: Platform Foundation
 
-Bicep, deployed at subscription scope. Nothing in here has been applied to
-Azure yet — this is infrastructure-as-code for review, not a record of what's
-live. `az` isn't installed in the environment this was written in; the notes
-below assume you're running from a machine (or Cloud Shell) that has it.
+Bicep, deployed at subscription scope. `dev` is live — this doc is both the
+IaC reference and, as of the first successful `az deployment sub create`,
+roughly a record of what's actually running there (Bicep is still the
+source of truth if the two ever disagree). `test`/`prod` are still
+infrastructure-as-code only. `az` isn't installed in the environment this
+was written in; the notes below assume you're running from a machine (or
+Cloud Shell) that has it.
 
 ## What gets created, per environment
 
@@ -105,6 +108,55 @@ az keyvault secret set \
 The API's managed identity has `Key Vault Secrets User` — read-only, no
 ability to list or manage other secrets, and no admin keys anywhere in the
 container image or its environment variables.
+
+## Release pipeline (OIDC setup)
+
+`.github/workflows/release-dev.yml` builds and deploys the API image on
+every push to `main`. It authenticates to Azure via OIDC — GitHub issues a
+short-lived token per run, Azure trusts it because of a federated
+credential, and no client secret is ever stored in GitHub. One-time setup,
+from Cloud Shell (same account that ran the Bicep deploy):
+
+```bash
+# 1. App registration + service principal
+APP_ID=$(az ad app create --display-name "ipacgs-github-actions-dev" --query appId -o tsv)
+az ad sp create --id "$APP_ID"
+
+# 2. Federated credential — trusts GitHub Actions runs from this repo's
+#    main branch specifically, nothing broader.
+az ad app federated-credential create --id "$APP_ID" --parameters '{
+  "name": "github-actions-main",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:lawrence-ipacgs/ipacgs-platform:ref:refs/heads/main",
+  "audiences": ["api://AzureADTokenExchange"]
+}'
+
+# 3. Role assignments — AcrPush on the registry, Container Apps Contributor
+#    on the resource group. Nothing broader (not subscription-level, not
+#    plain Contributor) than what building and deploying actually needs.
+SP_OBJECT_ID=$(az ad sp show --id "$APP_ID" --query id -o tsv)
+ACR_ID=$(az acr show --name cripacgsdev --resource-group rg-ipacgs-dev --query id -o tsv)
+RG_ID=$(az group show --name rg-ipacgs-dev --query id -o tsv)
+
+az role assignment create --assignee-object-id "$SP_OBJECT_ID" \
+  --assignee-principal-type ServicePrincipal --role "AcrPush" --scope "$ACR_ID"
+az role assignment create --assignee-object-id "$SP_OBJECT_ID" \
+  --assignee-principal-type ServicePrincipal --role "Container Apps Contributor" --scope "$RG_ID"
+
+# 4. Values for the next step
+echo "AZURE_CLIENT_ID:       $APP_ID"
+echo "AZURE_TENANT_ID:       $(az account show --query tenantId -o tsv)"
+echo "AZURE_SUBSCRIPTION_ID: $(az account show --query id -o tsv)"
+```
+
+Then add those three as **repository secrets** (Settings → Secrets and
+variables → Actions → New repository secret) named exactly
+`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` — the
+workflow reads them by those names. If `az ad app create` fails with a
+permissions error, that's a different Entra ID restriction (Graph API
+app-creation rights) than the "Azure CLI" enterprise-app block worked
+around above — same category of problem, likely needs the same kind of
+admin escalation if it comes up.
 
 ## App registration (Entra ID) — not yet in Bicep
 
