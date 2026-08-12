@@ -12,7 +12,11 @@ param projectPrefix = 'ipacgs'
 param platformAdminObjectId = '00000000-0000-0000-0000-000000000000'
 
 param postgresAdminLogin = 'ipacgsadmin'
-// postgresAdminPassword is intentionally NOT set here — pass it at deploy
-// time: --parameters postgresAdminPassword=$POSTGRES_ADMIN_PASSWORD
+// Read from the environment at deploy time, not hardcoded — .bicepparam
+// files are validated as a complete, self-contained set of parameters, so
+// a separate `--parameters postgresAdminPassword=...` CLI override does NOT
+// merge with this file the way a classic JSON parameters file would
+// (BCP258 if you try). Export POSTGRES_ADMIN_PASSWORD before deploying.
+param postgresAdminPassword = readEnvironmentVariable('POSTGRES_ADMIN_PASSWORD')
 
 param apiImageTag = 'placeholder'
