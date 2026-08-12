@@ -27,8 +27,8 @@ ipacgs-platform/
 
 Three environments, isolated at the resource-group level: `dev`, `test`, `prod`.
 See [`infra/README.md`](./infra/README.md) for the naming convention and how to deploy.
-**Nothing in this repo has been deployed to Azure yet** — `infra/bicep` is
-infrastructure-as-code for review, not a record of what's live.
+`dev` is live — see that doc for what's actually running there. `test`/`prod`
+are still infrastructure-as-code only, not deployed.
 
 ## Getting started (API)
 
@@ -38,12 +38,25 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env   # fill in local values — never commit .env
 alembic upgrade head
+python -m ipacgs.scripts.seed_opboh_catalogue   # illustrative catalogue — see that file's docstring
 uvicorn ipacgs.main:app --reload
 ```
 
-## What's in Milestone 1.1
+Interactive API docs once it's running: `http://localhost:8000/docs`.
 
-Tenant model, identity, secrets management, the base master-data schema
-(Tenant / Organisation / Person·Party), and the CI/CD foundation everything else
-gets built on. See Epic 0 in the architecture document's work breakdown for the
-full ticket list this scaffold implements.
+## What's built so far
+
+- **Epic 0 — Platform Foundation**: tenant model, identity, secrets management,
+  the base master-data schema (Tenant / Organisation / Person·Party), audit trail,
+  CI/CD.
+- **Epic 3 — OPBOH Framework Engine**, plus the Evidence slice it depends on:
+  the versioned/configurable catalogue, the scoring engine
+  (`services/opboh_scoring.py`), the assessment state machine and
+  segregation-of-duties enforcement (`services/opboh_workflow.py`), findings,
+  and 19 HTTP routes exposing all of it (`api/routes/opboh.py`,
+  `api/routes/evidence.py`). The catalogue currently loaded is an
+  **illustrative placeholder**, not KMI Africa's real OPBOH content — see
+  `scripts/seed_opboh_catalogue.py`'s docstring.
+
+See the architecture document's Section 4 (work breakdown) for the full ticket
+list each epic implements, and Section 6 for what's next.
