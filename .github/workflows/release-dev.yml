@@ -8,10 +8,17 @@ name: Release (dev)
 #
 # Authenticates via OIDC — no client secret stored anywhere. See
 # infra/README.md § Release pipeline (OIDC setup) for the one-time Azure
-# setup this depends on: an app registration, a federated credential
-# trusting this repo's GitHub Actions runs, and two role assignments
-# (AcrPush on the registry, Container Apps Contributor on the resource
-# group) — nothing broader than that.
+# setup this depends on: a user-assigned managed identity, a federated
+# credential trusting this repo's GitHub Actions runs, and two role
+# assignments (AcrPush on the registry, Container Apps Contributor on the
+# resource group) — nothing broader than that.
+#
+# No `environment:` on the job below, deliberately — GitHub changes the
+# OIDC subject claim format when a job references an environment
+# (...:environment:NAME instead of ...:ref:refs/heads/main), which the
+# federated credential wasn't configured to match and doesn't need to be:
+# there's no environment-specific protection rule or secret store this
+# needs, just the three plain repository secrets.
 
 on:
   push:
@@ -30,7 +37,6 @@ env:
 jobs:
   release-dev:
     runs-on: ubuntu-latest
-    environment: dev
     defaults:
       run:
         working-directory: services/api
