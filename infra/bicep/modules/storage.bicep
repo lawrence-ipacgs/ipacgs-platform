@@ -20,7 +20,6 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
     allowBlobPublicAccess: false
     supportsHttpsTrafficOnly: true
     accessTier: 'Hot'
-    isVersioningEnabled: true // FR-EVD-003 — every evidence upload is versioned
     networkAcls: {
       defaultAction: 'Deny'
       bypass: 'AzureServices'
@@ -32,6 +31,7 @@ resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-01-01'
   parent: storage
   name: 'default'
   properties: {
+    isVersioningEnabled: true // FR-EVD-003 — every evidence upload is versioned; belongs here, not on the account itself
     deleteRetentionPolicy: { enabled: true, days: 30 }
     containerDeleteRetentionPolicy: { enabled: true, days: 30 }
   }

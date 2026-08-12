@@ -6,9 +6,14 @@ Deliberately not using SQLite-in-memory here: this schema uses Postgres-only
 types (UUID, JSONB, native enums) that SQLite can't represent, and a test
 suite that passes against a database the app doesn't actually run on isn't
 worth much.
+
+Event loop scope is set to "session" in pyproject.toml
+([tool.pytest.ini_options]), not handled here — core/db.py's `engine` is a
+module-level singleton (correct for the real app), and a singleton asyncpg
+pool shared across per-test event loops (pytest-asyncio's default) fails
+with "attached to a different loop" the moment a second test touches it.
 """
 
-import asyncio
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -18,14 +23,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ipacgs.core.db import async_session_factory, engine
 from ipacgs.main import app
 from ipacgs.models import Base
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _event_loop_policy():
-    # pytest-asyncio in auto mode needs a session-scoped loop for the
-    # session-scoped schema fixture below.
-    policy = asyncio.get_event_loop_policy()
-    yield policy
 
 
 @pytest.fixture(scope="session")

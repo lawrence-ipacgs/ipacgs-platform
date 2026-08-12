@@ -15,18 +15,27 @@ of "this specific record's preparer."
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, cast
 
 import httpx
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import jwt
-from jose.exceptions import JWTError
+from jwt import PyJWTError
+from jwt.algorithms import RSAAlgorithm
 
 from ipacgs.core.config import get_settings
+
+# PyJWT, not python-jose: jose's ECDSA path depends on the standalone
+# `ecdsa` package (pure-Python, with unfixed timing-related CVEs — see
+# PYSEC-2026-1325) regardless of installing jose's [cryptography] extra.
+# PyJWT[crypto] uses the `cryptography` library for every algorithm,
+# including the RS256 this module actually uses, with no ecdsa dependency
+# at all.
 
 settings = get_settings()
 bearer_scheme = HTTPBearer(auto_error=True)
@@ -83,20 +92,23 @@ async def get_current_user(
     try:
         jwks = await _get_jwks()
         unverified_header = jwt.get_unverified_header(token)
-        key = next((k for k in jwks if k["kid"] == unverified_header.get("kid")), None)
-        if key is None:
+        jwk = next((k for k in jwks if k["kid"] == unverified_header.get("kid")), None)
+        if jwk is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token signed by an unrecognised key.",
             )
+        # PyJWT wants an actual public-key object for asymmetric
+        # algorithms, not the raw JWK dict jose accepted directly.
+        public_key = RSAAlgorithm.from_jwk(json.dumps(jwk))
         claims = jwt.decode(
             token,
-            key,
+            public_key,  # type: ignore[arg-type]
             algorithms=["RS256"],
             audience=settings.entra_api_app_id,
             issuer=issuer,
         )
-    except JWTError as exc:
+    except PyJWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid token: {exc}",

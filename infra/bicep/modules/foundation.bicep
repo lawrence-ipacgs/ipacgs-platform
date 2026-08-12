@@ -5,6 +5,7 @@ param location string
 param projectPrefix string
 param tags object
 param platformAdminObjectId string
+param platformAdminPrincipalType string
 param postgresAdminLogin string
 
 @secure()
@@ -21,12 +22,6 @@ module logAnalytics 'log-analytics.bicep' = {
   }
 }
 
-// Needed to read the workspace's shared key for Container Apps' log
-// destination — listKeys() requires a resource reference, not just an id.
-resource existingWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
-  name: logAnalytics.outputs.workspaceName
-}
-
 module keyVault 'keyvault.bicep' = {
   name: 'key-vault'
   params: {
@@ -35,6 +30,7 @@ module keyVault 'keyvault.bicep' = {
     environment: environment
     tags: tags
     platformAdminObjectId: platformAdminObjectId
+    platformAdminPrincipalType: platformAdminPrincipalType
     workspaceId: logAnalytics.outputs.workspaceId
   }
 }
@@ -80,12 +76,11 @@ module containerApps 'container-apps.bicep' = {
     projectPrefix: projectPrefix
     environment: environment
     tags: tags
-    workspaceId: logAnalytics.outputs.workspaceId
     workspaceCustomerId: logAnalytics.outputs.workspaceCustomerId
-    workspaceSharedKey: existingWorkspace.listKeys().primarySharedKey
+    workspaceSharedKey: logAnalytics.outputs.workspaceSharedKey
     registryLoginServer: registry.outputs.loginServer
-    registryId: registry.outputs.registryId
-    keyVaultId: keyVault.outputs.vaultId
+    registryName: registry.outputs.registryName
+    keyVaultName: keyVault.outputs.vaultName
     keyVaultUri: keyVault.outputs.vaultUri
     apiImageTag: apiImageTag
   }

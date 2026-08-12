@@ -4,9 +4,11 @@ param environment = 'prod'
 param location = 'southafricanorth'
 param projectPrefix = 'ipacgs'
 
-// Prod platform-admin group should be smaller and more tightly controlled
-// than dev/test's — confirm membership before first deploy.
+// Prod should use a real group, not an individual account — smaller,
+// more tightly controlled membership than dev/test's shortcut. Explicit
+// here rather than relying on main.bicep's User default.
 param platformAdminObjectId = '00000000-0000-0000-0000-000000000000'
+param platformAdminPrincipalType = 'Group'
 
 param postgresAdminLogin = 'ipacgsadmin'
 // postgresAdminPassword passed at deploy time, from a dedicated prod secret

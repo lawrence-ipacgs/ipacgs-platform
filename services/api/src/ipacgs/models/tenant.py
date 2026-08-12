@@ -27,7 +27,18 @@ class Tenant(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(63), nullable=False, unique=True)
     status: Mapped[TenantStatus] = mapped_column(
-        Enum(TenantStatus, name="tenant_status"), nullable=False, default=TenantStatus.ACTIVE
+        # values_callable: SQLAlchemy's Enum() sends the member NAME
+        # ("ACTIVE") to the database by default, not its value ("active") —
+        # the migration's native Postgres enum only has the lowercase
+        # values, so without this every insert fails with "invalid input
+        # value for enum tenant_status".
+        Enum(
+            TenantStatus,
+            name="tenant_status",
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+        ),
+        nullable=False,
+        default=TenantStatus.ACTIVE,
     )
 
     created_at: Mapped[datetime] = mapped_column(

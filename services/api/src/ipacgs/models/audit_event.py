@@ -37,7 +37,15 @@ class AuditEvent(Base, TenantScopedMixin):
     )
     actor_object_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     action: Mapped[AuditAction] = mapped_column(
-        Enum(AuditAction, name="audit_action"), nullable=False
+        # Same values_callable fix as Tenant.status (models/tenant.py) — same
+        # root cause, just not yet exercised by a passing test before that
+        # one blocked on it first.
+        Enum(
+            AuditAction,
+            name="audit_action",
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+        ),
+        nullable=False,
     )
 
     entity_type: Mapped[str] = mapped_column(

@@ -70,9 +70,15 @@ jobs:
       - name: Static security scan (bandit)
         run: bandit -r src -ll
       - name: Dependency vulnerability scan (pip-audit)
+        # --skip-editable didn't work here: --strict treats "skipped
+        # because editable" the same as "could not be audited" and still
+        # fails. Auditing a frozen requirements list instead means our own
+        # editable package never appears in what pip-audit is asked to
+        # check in the first place — nothing to skip, nothing to fail on.
         run: |
           pip install pip-audit
-          pip-audit --strict
+          pip freeze --exclude-editable > /tmp/requirements-audit.txt
+          pip-audit --strict -r /tmp/requirements-audit.txt
 
   build:
     needs: [lint, test]
