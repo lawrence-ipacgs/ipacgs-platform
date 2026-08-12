@@ -65,7 +65,11 @@ async def catalogue(
     critical-failure path end to end."""
     version = OpbohFrameworkVersion(
         id=uuid.uuid4(),
-        version_label=f"test-{uuid.uuid4()}",
+        # version_label is String(20) — a real version label is short
+        # ("1.1", "2.0-beta"); a full UUID as the "make it unique per test"
+        # suffix blew straight through that, which is exactly what CI's
+        # Postgres caught and this sandbox's DB-less checks couldn't.
+        version_label=f"t-{uuid.uuid4().hex[:8]}",
         effective_from=date(2026, 1, 1),
         is_active=True,
         created_by="seed",
