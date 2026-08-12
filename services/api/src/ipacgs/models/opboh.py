@@ -35,7 +35,7 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ipacgs.models.base import AuditedMixin, Base, TenantScopedMixin
 
@@ -84,6 +84,10 @@ class OpbohDomain(Base):
     weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     min_score_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.6)
 
+    questions: Mapped[list["OpbohQuestion"]] = relationship(
+        back_populates="domain", order_by="OpbohQuestion.sequence"
+    )
+
 
 class OpbohQuestion(Base):
     __tablename__ = "opboh_questions"
@@ -92,6 +96,7 @@ class OpbohQuestion(Base):
     domain_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("opboh_domains.id"), nullable=False
     )
+    domain: Mapped["OpbohDomain"] = relationship(back_populates="questions")
     control_objective: Mapped[str] = mapped_column(
         String(500),
         nullable=False,

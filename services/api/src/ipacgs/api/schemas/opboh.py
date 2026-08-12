@@ -1,0 +1,104 @@
+"""Request/response shapes for the OPBOH routes. Kept separate from the
+ORM models on purpose — what a client sends and receives is its own
+contract, not automatically whatever the database schema happens to be."""
+
+import uuid
+from datetime import date, datetime
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from ipacgs.models.opboh import FindingSeverity, FindingStatus, OpbohAssessmentStatus
+
+
+class CreateAssessmentRequest(BaseModel):
+    organisation_id: uuid.UUID
+    framework_version_id: uuid.UUID | None = Field(
+        default=None, description="Defaults to the current active OPBOH version if omitted."
+    )
+
+
+class AssessmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    organisation_id: uuid.UUID
+    framework_version_id: uuid.UUID
+    status: OpbohAssessmentStatus
+    prepared_by: str
+    assessed_by: str | None
+    reviewed_by: str | None
+    approved_by: str | None
+    overall_score: float | None
+    has_critical_failure: bool
+    decision_summary: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class UpsertResponseRequest(BaseModel):
+    question_id: uuid.UUID
+    score: float = Field(ge=0.0, le=1.0)
+    evidence_sufficient: bool | None = None
+    notes: str | None = None
+    evidence_document_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class ResponseOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    assessment_id: uuid.UUID
+    question_id: uuid.UUID
+    score: float | None
+    evidence_sufficient: bool | None
+    notes: str | None
+    answered_by: str | None
+    answered_at: datetime | None
+
+
+class DecideRequest(BaseModel):
+    decision: Literal["accepted", "conditionally_accepted", "rejected"]
+    decision_summary: str | None = None
+
+
+class CriticalFailureOut(BaseModel):
+    question_id: str
+    control_objective: str
+    reason: str
+
+
+class DomainResultOut(BaseModel):
+    domain_id: str
+    name: str
+    score: float
+    meets_threshold: bool
+    critical_failures: list[CriticalFailureOut]
+    unanswered_count: int
+
+
+class ScoreOut(BaseModel):
+    overall_score: float
+    is_clean: bool
+    has_critical_failure: bool
+    domain_results: list[DomainResultOut]
+
+
+class FindingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    assessment_id: uuid.UUID
+    response_id: uuid.UUID | None
+    severity: FindingSeverity
+    description: str
+    status: FindingStatus
+    owner: str | None
+    due_date: date | None
+    closed_at: datetime | None
+
+
+class AssignFindingRequest(BaseModel):
+    owner: str
+    due_date: date
