@@ -70,13 +70,15 @@ jobs:
       - name: Static security scan (bandit)
         run: bandit -r src -ll
       - name: Dependency vulnerability scan (pip-audit)
-        # --skip-editable: without it, pip-audit tries to look up
-        # ipacgs-api itself (installed via `pip install -e .` above) on
-        # PyPI and fails, since it's our own private package, not a
-        # published one — not a real dependency to audit.
+        # --skip-editable didn't work here: --strict treats "skipped
+        # because editable" the same as "could not be audited" and still
+        # fails. Auditing a frozen requirements list instead means our own
+        # editable package never appears in what pip-audit is asked to
+        # check in the first place — nothing to skip, nothing to fail on.
         run: |
           pip install pip-audit
-          pip-audit --strict --skip-editable
+          pip freeze --exclude-editable > /tmp/requirements-audit.txt
+          pip-audit --strict -r /tmp/requirements-audit.txt
 
   build:
     needs: [lint, test]
