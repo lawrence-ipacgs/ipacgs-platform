@@ -169,14 +169,25 @@ az identity federated-credential update \
   --subject "repo:lawrence-ipacgs@315389971/ipacgs-platform@1329852884:ref:refs/heads/main" \
   --audiences "api://AzureADTokenExchange"
 
-# 3. Role assignments — AcrPush on the registry, Container Apps Contributor
-#    on the resource group. Nothing broader (not subscription-level, not
-#    plain Contributor) than what building and deploying actually needs.
+# 3. Role assignments — AcrPush + Reader on the registry, Container Apps
+#    Contributor on the resource group. Nothing broader (not
+#    subscription-level, not plain Contributor) than what building and
+#    deploying actually needs.
+#
+#    AcrPush alone isn't enough for `az acr build`: it grants the
+#    data-plane pull/push actions but not the control-plane
+#    Microsoft.ContainerRegistry/registries/read action `az acr build`
+#    needs just to look up the registry's own properties (login server,
+#    SKU) before a build can start. Without Reader too, a run fails with
+#    AuthorizationFailed on that read action even though the registry
+#    resolves fine and AcrPush would be enough for the actual push.
 ACR_ID=$(az acr show --name cripacgsdev --resource-group rg-ipacgs-dev --query id -o tsv)
 RG_ID=$(az group show --name rg-ipacgs-dev --query id -o tsv)
 
 az role assignment create --assignee-object-id "$PRINCIPAL_ID" \
   --assignee-principal-type ServicePrincipal --role "AcrPush" --scope "$ACR_ID"
+az role assignment create --assignee-object-id "$PRINCIPAL_ID" \
+  --assignee-principal-type ServicePrincipal --role "Reader" --scope "$ACR_ID"
 az role assignment create --assignee-object-id "$PRINCIPAL_ID" \
   --assignee-principal-type ServicePrincipal --role "Container Apps Contributor" --scope "$RG_ID"
 
