@@ -55,9 +55,18 @@ jobs:
         # setup needed, and the runner never holds a registry credential
         # more powerful than "trigger a build" (az acr build uses the same
         # OIDC-derived token from the login step above).
+        #
+        # --resource-group is explicit rather than left for az to resolve
+        # by searching the subscription for a registry with this name: the
+        # managed identity's AcrPush role assignment is scoped to this one
+        # registry resource, not the subscription, so a name-only lookup
+        # can fail to resolve even when the registry exists (this bit a
+        # real run — "could not be found in subscription", identical to
+        # the error a genuinely missing registry would produce).
         run: |
           az acr build \
             --registry "$REGISTRY_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
             --image "ipacgs-api:${{ github.sha }}" \
             --image "ipacgs-api:latest" \
             .
