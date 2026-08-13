@@ -9,12 +9,13 @@ name: Release (dev)
 # Authenticates via OIDC — no client secret stored anywhere. See
 # infra/README.md § Release pipeline (OIDC setup) for the one-time Azure
 # setup this depends on: a user-assigned managed identity, a federated
-# credential trusting this repo's GitHub Actions runs, and three role
-# assignments (AcrPush + Reader on the registry, Container Apps
-# Contributor on the resource group) — nothing broader than that. AcrPush
-# alone 404/403s `az acr build`: it grants push/pull data actions but not
-# the registries/read control-plane action the build needs just to look
-# up the registry's own properties first.
+# credential trusting this repo's GitHub Actions runs, and two role
+# assignments scoped one resource each — Contributor on the registry,
+# Container Apps Contributor on the resource group. `az acr build` runs
+# as an ACR Task under the hood, needing registry management-plane
+# actions (source upload, scheduling a run) that AcrPush/AcrPull/Reader
+# don't grant between them — Contributor on the registry is what
+# Microsoft's own docs recommend for CI systems driving `az acr build`.
 #
 # No `environment:` on the job below, deliberately — GitHub changes the
 # OIDC subject claim format when a job references an environment
