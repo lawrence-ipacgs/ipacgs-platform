@@ -169,14 +169,30 @@ az identity federated-credential update \
   --subject "repo:lawrence-ipacgs@315389971/ipacgs-platform@1329852884:ref:refs/heads/main" \
   --audiences "api://AzureADTokenExchange"
 
-# 3. Role assignments — AcrPush on the registry, Container Apps Contributor
-#    on the resource group. Nothing broader (not subscription-level, not
-#    plain Contributor) than what building and deploying actually needs.
+# 3. Role assignments — Contributor on the registry, Container Apps
+#    Contributor on the resource group. Scoped to one resource each, not
+#    subscription- or resource-group-wide — but Contributor rather than
+#    AcrPush on the registry specifically, for the reason below.
+#
+#    `az acr build` doesn't just push an image — it runs as an ACR Task
+#    ("quick build"), which needs registry management-plane actions
+#    (Microsoft.ContainerRegistry/registries/read to look up the
+#    registry's properties first, then listBuildSourceUploadUrl/action to
+#    upload the build context, then scheduleRun/action and the
+#    runs/taskRuns actions to actually run the build) that AcrPush,
+#    AcrPull and Reader don't cover between them — those three only grant
+#    image data-plane pull/push and generic resource read. Discovered by
+#    hitting each missing action one at a time across three separate
+#    failed runs; Contributor is what Microsoft's own docs actually
+#    recommend for CI systems driving `az acr build`, so grant it
+#    directly rather than assembling a custom role action-by-action.
+#    Still scoped to just this one registry resource, not the resource
+#    group it lives in.
 ACR_ID=$(az acr show --name cripacgsdev --resource-group rg-ipacgs-dev --query id -o tsv)
 RG_ID=$(az group show --name rg-ipacgs-dev --query id -o tsv)
 
 az role assignment create --assignee-object-id "$PRINCIPAL_ID" \
-  --assignee-principal-type ServicePrincipal --role "AcrPush" --scope "$ACR_ID"
+  --assignee-principal-type ServicePrincipal --role "Contributor" --scope "$ACR_ID"
 az role assignment create --assignee-object-id "$PRINCIPAL_ID" \
   --assignee-principal-type ServicePrincipal --role "Container Apps Contributor" --scope "$RG_ID"
 
