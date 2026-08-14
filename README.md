@@ -38,8 +38,9 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env   # fill in local values — never commit .env
 alembic upgrade head
-python -m ipacgs.scripts.seed_opboh_catalogue   # illustrative catalogue — see that file's docstring
-python -m ipacgs.scripts.seed_stages            # illustrative S1-S4 sequence — see that file's docstring
+python -m ipacgs.scripts.seed_opboh_catalogue      # illustrative catalogue — see that file's docstring
+python -m ipacgs.scripts.seed_stages               # illustrative S1-S4 sequence — see that file's docstring
+python -m ipacgs.scripts.seed_framework_registry   # illustrative 29-framework metadata — see that file's docstring
 uvicorn ipacgs.main:app --reload
 ```
 
@@ -75,6 +76,25 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   by `scripts/seed_stages.py` is an **illustrative** S1–S4 sequence.
   Advancing a project's stage requires an accepted OPBOH assessment for
   the same organisation — never just a date.
+- **Epic 4/5 gap-closing**: the real ticket lists for Epics 4 and 5 turned
+  out to be bigger than what those two epics originally shipped — see git
+  history for the reconciliation. Closed since: illustrative metadata for
+  the other 29 IPAC frameworks (`scripts/seed_framework_registry.py`, all
+  `is_active=False` — "registered, not yet assessable"); a minimal
+  sector-based applicability engine (`services/framework_applicability.py`,
+  `GET /projects/{id}/applicable-frameworks`); stage reopening
+  (`POST /projects/{id}/reopen-stage`, requires a reason, no supporting
+  assessment — the opposite direction from PRN-001); RAG status computed
+  from the existing OPBOH scoring engine (`GET /projects/{id}/rag`);
+  owner/due-date assignment on the current stage
+  (`POST /projects/{id}/assign`); and residual gaps surfaced via the
+  existing `OpbohFinding` mechanism rather than a second one
+  (`GET /projects/{id}/open-findings`). Still not attempted: jurisdiction/
+  risk-based applicability (sector only), per-stage OPBOH domain-level
+  entry criteria (still "needs an accepted assessment", not "needs domain
+  X ≥ threshold"), and the UACOC intake-process mapping — that one's
+  labelled a Spike in the ticket list, not a build task, and needs the
+  actual 190-step document.
 - **Release pipeline**: `.github/workflows/release-dev.yml` builds and
   deploys a real image to `dev` on every push to `main`, OIDC-authenticated,
   no stored Azure credentials — see `infra/README.md` § Release pipeline.

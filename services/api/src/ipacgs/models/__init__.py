@@ -4,7 +4,7 @@ generally) sees the full schema from a single import of this package."""
 from ipacgs.models.audit_event import AuditAction, AuditEvent
 from ipacgs.models.base import Base
 from ipacgs.models.evidence import EvidenceDocument, EvidenceStatus
-from ipacgs.models.framework import Framework, FrameworkVersion
+from ipacgs.models.framework import Framework, FrameworkApplicabilityRule, FrameworkVersion
 from ipacgs.models.opboh import (
     FindingSeverity,
     FindingStatus,
@@ -19,7 +19,13 @@ from ipacgs.models.opboh import (
 )
 from ipacgs.models.organisation import Organisation, OrganisationDuplicateCheck
 from ipacgs.models.person import Person
-from ipacgs.models.project import Project, ProjectStatus, Stage, StageGateDecision
+from ipacgs.models.project import (
+    Project,
+    ProjectStatus,
+    Stage,
+    StageGateDecision,
+    StageGateDecisionKind,
+)
 from ipacgs.models.tenant import Tenant, TenantStatus
 
 __all__ = [
@@ -31,6 +37,7 @@ __all__ = [
     "FindingSeverity",
     "FindingStatus",
     "Framework",
+    "FrameworkApplicabilityRule",
     "FrameworkVersion",
     "OpbohAssessment",
     "OpbohAssessmentStatus",
@@ -47,6 +54,7 @@ __all__ = [
     "ProjectStatus",
     "Stage",
     "StageGateDecision",
+    "StageGateDecisionKind",
     "Tenant",
     "TenantStatus",
 ]

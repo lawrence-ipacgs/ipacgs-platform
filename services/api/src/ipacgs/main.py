@@ -18,9 +18,10 @@ logging.basicConfig(level=settings.log_level)
 app = FastAPI(
     title="IPAC Governance Systems API",
     description="Milestone 1.1 — Platform Foundation, Epic 3 (OPBOH), Epic 4 (Framework "
-    "Registry) and Epic 5 (Stage Engine). See the architecture document's Section 4 for what "
-    "this service does and doesn't do yet.",
-    version="0.4.0",
+    "Registry) and Epic 5 (Stage Engine), plus Epic 4/5 gap-closing work (applicability "
+    "rules, reopen/RAG/assignment). See the architecture document's Section 4 for what this "
+    "service does and doesn't do yet.",
+    version="0.5.0",
 )
 
 app.include_router(health.router)

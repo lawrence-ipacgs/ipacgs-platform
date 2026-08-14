@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ipacgs.core.security import CurrentUser, get_current_user
 from ipacgs.main import app
+from ipacgs.models.framework import Framework
 from ipacgs.models.opboh import OpbohAssessment, OpbohAssessmentStatus, OpbohFrameworkVersion
 from ipacgs.models.organisation import Organisation
 from ipacgs.models.project import Stage
@@ -253,3 +254,147 @@ async def test_advance_stage_for_an_unknown_project_is_404(client: AsyncClient) 
         json={"supporting_assessment_id": str(uuid.uuid4())},
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# reopen-stage, assign, rag, open-findings, applicable-frameworks —
+# Epic 4/5 gap-closing
+# ---------------------------------------------------------------------------
+
+
+async def test_reopen_stage_moves_back_and_clears_the_assignment(
+    client: AsyncClient,
+    organisation: Organisation,
+    two_stages: tuple[Stage, Stage],
+    db_session: AsyncSession,
+) -> None:
+    stage_a, stage_b = two_stages
+    assessment = await _accepted_assessment(db_session, organisation)
+
+    _as("alice")
+    create_resp = await client.post(
+        "/projects", json={"organisation_id": str(organisation.id), "name": "Test Project"}
+    )
+    project_id = create_resp.json()["id"]
+    await client.post(
+        f"/projects/{project_id}/advance-stage",
+        json={"supporting_assessment_id": str(assessment.id)},
+    )
+    await client.post(
+        f"/projects/{project_id}/assign", json={"assigned_to": "carol", "due_date": "2026-12-01"}
+    )
+
+    reopen_resp = await client.post(
+        f"/projects/{project_id}/reopen-stage",
+        json={"target_stage_id": str(stage_a.id), "reason": "Registration lapsed."},
+    )
+    assert reopen_resp.status_code == 200, reopen_resp.text
+    decision = reopen_resp.json()
+    assert decision["kind"] == "reopen"
+    assert decision["from_stage_id"] == str(stage_b.id)
+    assert decision["to_stage_id"] == str(stage_a.id)
+    assert decision["supporting_assessment_id"] is None
+
+    project_resp = await client.get(f"/projects/{project_id}")
+    body = project_resp.json()
+    assert body["current_stage_id"] == str(stage_a.id)
+    assert body["assigned_to"] is None
+    assert body["stage_due_date"] is None
+
+
+async def test_reopen_stage_without_a_reason_is_rejected(
+    client: AsyncClient, organisation: Organisation, two_stages: tuple[Stage, Stage]
+) -> None:
+    stage_a, _stage_b = two_stages
+    _as("alice")
+    create_resp = await client.post(
+        "/projects", json={"organisation_id": str(organisation.id), "name": "Test Project"}
+    )
+    project_id = create_resp.json()["id"]
+
+    resp = await client.post(
+        f"/projects/{project_id}/reopen-stage",
+        json={"target_stage_id": str(stage_a.id), "reason": "   "},
+    )
+    assert resp.status_code == 409
+
+
+async def test_assign_stage_sets_owner_and_due_date(
+    client: AsyncClient, organisation: Organisation, two_stages: tuple[Stage, Stage]
+) -> None:
+    _as("alice")
+    create_resp = await client.post(
+        "/projects", json={"organisation_id": str(organisation.id), "name": "Test Project"}
+    )
+    project_id = create_resp.json()["id"]
+
+    resp = await client.post(
+        f"/projects/{project_id}/assign", json={"assigned_to": "dave", "due_date": "2026-09-15"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["assigned_to"] == "dave"
+    assert resp.json()["stage_due_date"] == "2026-09-15"
+
+
+async def test_rag_endpoint_is_grey_before_any_assessment(
+    client: AsyncClient, organisation: Organisation, two_stages: tuple[Stage, Stage]
+) -> None:
+    _as("alice")
+    create_resp = await client.post(
+        "/projects", json={"organisation_id": str(organisation.id), "name": "Test Project"}
+    )
+    project_id = create_resp.json()["id"]
+
+    resp = await client.get(f"/projects/{project_id}/rag")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "grey"
+
+
+async def test_open_findings_endpoint_returns_empty_list_with_no_findings(
+    client: AsyncClient, organisation: Organisation, two_stages: tuple[Stage, Stage]
+) -> None:
+    _as("alice")
+    create_resp = await client.post(
+        "/projects", json={"organisation_id": str(organisation.id), "name": "Test Project"}
+    )
+    project_id = create_resp.json()["id"]
+
+    resp = await client.get(f"/projects/{project_id}/open-findings")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+async def test_applicable_frameworks_includes_a_rule_free_active_framework(
+    client: AsyncClient,
+    organisation: Organisation,
+    two_stages: tuple[Stage, Stage],
+    db_session: AsyncSession,
+) -> None:
+    """Framework.code is globally unique and this test commits one for
+    real (same reason two_stages does) — randomized, same lesson as
+    everywhere else in this file."""
+    framework = Framework(
+        id=uuid.uuid4(),
+        code=_unique("fw"),
+        name="Test Framework",
+        is_active=True,
+        created_by="seed",
+        updated_by="seed",
+    )
+    db_session.add(framework)
+    await db_session.commit()
+
+    _as("alice")
+    create_resp = await client.post(
+        "/projects",
+        json={
+            "organisation_id": str(organisation.id),
+            "name": "Test Project",
+            "sector": "infrastructure",
+        },
+    )
+    project_id = create_resp.json()["id"]
+
+    resp = await client.get(f"/projects/{project_id}/applicable-frameworks")
+    assert resp.status_code == 200
+    assert str(framework.id) in {f["id"] for f in resp.json()}

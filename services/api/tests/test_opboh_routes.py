@@ -22,6 +22,7 @@ from ipacgs.core.security import CurrentUser, get_current_user
 from ipacgs.main import app
 from ipacgs.models.opboh import OpbohDomain, OpbohFrameworkVersion, OpbohQuestion
 from ipacgs.models.organisation import Organisation
+from ipacgs.models.project import Project, ProjectStatus, Stage
 from ipacgs.models.tenant import Tenant
 
 
@@ -234,3 +235,66 @@ async def test_creating_an_assessment_for_an_unknown_organisation_is_404(
     _as("alice")
     resp = await client.post("/opboh/assessments", json={"organisation_id": str(uuid.uuid4())})
     assert resp.status_code == 404
+
+
+async def _make_project(db_session: AsyncSession, organisation: Organisation) -> Project:
+    stage = Stage(
+        id=uuid.uuid4(),
+        code=f"stg-{uuid.uuid4().hex[:8]}",
+        name="Stage",
+        sequence=uuid.uuid4().int % 1_000_000,
+        is_active=True,
+        created_by="seed",
+        updated_by="seed",
+    )
+    db_session.add(stage)
+    await db_session.flush()
+    project = Project(
+        id=uuid.uuid4(),
+        tenant_id=organisation.tenant_id,
+        organisation_id=organisation.id,
+        name="Test Project",
+        current_stage_id=stage.id,
+        status=ProjectStatus.ACTIVE,
+        created_by="seed",
+        updated_by="seed",
+    )
+    db_session.add(project)
+    await db_session.commit()
+    return project
+
+
+async def test_creating_an_assessment_links_the_given_project(
+    client: AsyncClient, organisation: Organisation, db_session: AsyncSession
+) -> None:
+    project = await _make_project(db_session, organisation)
+
+    _as("alice")
+    resp = await client.post(
+        "/opboh/assessments",
+        json={"organisation_id": str(organisation.id), "project_id": str(project.id)},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["project_id"] == str(project.id)
+
+
+async def test_creating_an_assessment_for_a_project_in_a_different_organisation_is_409(
+    client: AsyncClient, organisation: Organisation, db_session: AsyncSession
+) -> None:
+    other_org = Organisation(
+        id=uuid.uuid4(),
+        tenant_id=organisation.tenant_id,
+        legal_name="Other Org Ltd",
+        created_by="seed",
+        updated_by="seed",
+    )
+    db_session.add(other_org)
+    await db_session.commit()
+    project = await _make_project(db_session, other_org)
+
+    _as("alice")
+    resp = await client.post(
+        "/opboh/assessments",
+        json={"organisation_id": str(organisation.id), "project_id": str(project.id)},
+    )
+    assert resp.status_code == 409

@@ -16,6 +16,12 @@ class CreateAssessmentRequest(BaseModel):
     framework_version_id: uuid.UUID | None = Field(
         default=None, description="Defaults to the current active OPBOH version if omitted."
     )
+    project_id: uuid.UUID | None = Field(
+        default=None,
+        description="Links this assessment to a Project (Epic 5) so its stage-gate "
+        "decisions and RAG status can reference it. Optional — screening assessments "
+        "genuinely predate any Project existing.",
+    )
 
 
 class AssessmentOut(BaseModel):
@@ -24,6 +30,7 @@ class AssessmentOut(BaseModel):
     id: uuid.UUID
     tenant_id: uuid.UUID
     organisation_id: uuid.UUID
+    project_id: uuid.UUID | None
     framework_version_id: uuid.UUID
     status: OpbohAssessmentStatus
     prepared_by: str

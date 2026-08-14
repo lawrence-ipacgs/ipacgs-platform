@@ -9,15 +9,29 @@ from datetime import date
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ipacgs.models.opboh import OpbohAssessment, OpbohAssessmentStatus, OpbohFrameworkVersion
+from ipacgs.models.opboh import (
+    FindingSeverity,
+    FindingStatus,
+    OpbohAssessment,
+    OpbohAssessmentStatus,
+    OpbohDomain,
+    OpbohFinding,
+    OpbohFrameworkVersion,
+    OpbohQuestion,
+)
 from ipacgs.models.organisation import Organisation
-from ipacgs.models.project import Stage
+from ipacgs.models.project import Project, Stage
 from ipacgs.models.tenant import Tenant
 from ipacgs.services.stage_engine import (
     IllegalStageAdvancement,
     NoStagesConfigured,
+    RagStatus,
     advance_stage,
+    assign_stage,
+    compute_project_rag,
     create_project,
+    list_open_findings_for_project,
+    reopen_stage,
 )
 
 
@@ -64,7 +78,11 @@ async def _make_stages(db_session: AsyncSession, count: int) -> list[Stage]:
 
 
 async def _make_assessment(
-    db_session: AsyncSession, org: Organisation, *, status: OpbohAssessmentStatus
+    db_session: AsyncSession,
+    org: Organisation,
+    *,
+    status: OpbohAssessmentStatus,
+    project: Project | None = None,
 ) -> OpbohAssessment:
     version = OpbohFrameworkVersion(
         id=uuid.uuid4(),
@@ -81,6 +99,7 @@ async def _make_assessment(
         tenant_id=org.tenant_id,
         framework_version_id=version.id,
         organisation_id=org.id,
+        project_id=project.id if project else None,
         status=status,
         prepared_by="alice",
         has_critical_failure=False,
@@ -198,3 +217,264 @@ async def test_advance_stage_at_the_final_stage_raises(db_session: AsyncSession)
 
     with pytest.raises(IllegalStageAdvancement, match="final configured stage"):
         await advance_stage(db_session, project, supporting_assessment=assessment, actor="alice")
+
+
+# ---------------------------------------------------------------------------
+# reopen_stage — Epic 5 gap-closing
+# ---------------------------------------------------------------------------
+
+
+async def test_reopen_stage_moves_to_an_earlier_stage(db_session: AsyncSession) -> None:
+    org = await _make_tenant_and_org(db_session)
+    stages = await _make_stages(db_session, 3)
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+    assessment = await _make_assessment(db_session, org, status=OpbohAssessmentStatus.ACCEPTED)
+    await advance_stage(db_session, project, supporting_assessment=assessment, actor="alice")
+    assert project.current_stage_id == stages[1].id
+
+    decision = await reopen_stage(
+        db_session,
+        project,
+        target_stage_id=stages[0].id,
+        actor="bob",
+        reason="Evidence withdrawn — sponsor registration lapsed.",
+    )
+
+    assert decision.kind.value == "reopen"
+    assert decision.from_stage_id == stages[1].id
+    assert decision.to_stage_id == stages[0].id
+    assert decision.supporting_assessment_id is None
+    assert project.current_stage_id == stages[0].id
+
+
+async def test_reopen_stage_requires_a_reason(db_session: AsyncSession) -> None:
+    org = await _make_tenant_and_org(db_session)
+    stages = await _make_stages(db_session, 2)
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+    assessment = await _make_assessment(db_session, org, status=OpbohAssessmentStatus.ACCEPTED)
+    await advance_stage(db_session, project, supporting_assessment=assessment, actor="alice")
+
+    with pytest.raises(IllegalStageAdvancement, match="reason"):
+        await reopen_stage(
+            db_session, project, target_stage_id=stages[0].id, actor="bob", reason="   "
+        )
+
+
+async def test_reopen_stage_rejects_a_later_or_equal_stage(db_session: AsyncSession) -> None:
+    org = await _make_tenant_and_org(db_session)
+    stages = await _make_stages(db_session, 3)
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+
+    with pytest.raises(IllegalStageAdvancement, match="earlier"):
+        await reopen_stage(
+            db_session, project, target_stage_id=stages[2].id, actor="bob", reason="Mistake."
+        )
+    with pytest.raises(IllegalStageAdvancement, match="earlier"):
+        await reopen_stage(
+            db_session, project, target_stage_id=stages[0].id, actor="bob", reason="Mistake."
+        )
+
+
+# ---------------------------------------------------------------------------
+# assign_stage — Epic 5 gap-closing
+# ---------------------------------------------------------------------------
+
+
+async def test_assign_stage_sets_owner_and_due_date(db_session: AsyncSession) -> None:
+    org = await _make_tenant_and_org(db_session)
+    await _make_stages(db_session, 1)
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+
+    updated = await assign_stage(
+        db_session, project, assigned_to="carol", due_date=date(2026, 12, 1), actor="alice"
+    )
+
+    assert updated.assigned_to == "carol"
+    assert updated.stage_due_date == date(2026, 12, 1)
+
+
+async def test_advancing_resets_the_stage_assignment(db_session: AsyncSession) -> None:
+    org = await _make_tenant_and_org(db_session)
+    await _make_stages(db_session, 2)
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+    await assign_stage(
+        db_session, project, assigned_to="carol", due_date=date(2026, 12, 1), actor="alice"
+    )
+    assessment = await _make_assessment(db_session, org, status=OpbohAssessmentStatus.ACCEPTED)
+
+    await advance_stage(db_session, project, supporting_assessment=assessment, actor="alice")
+
+    assert project.assigned_to is None
+    assert project.stage_due_date is None
+
+
+# ---------------------------------------------------------------------------
+# compute_project_rag — Epic 5 gap-closing
+# ---------------------------------------------------------------------------
+
+
+async def test_rag_is_grey_with_no_linked_assessment(db_session: AsyncSession) -> None:
+    org = await _make_tenant_and_org(db_session)
+    await _make_stages(db_session, 1)
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+
+    assert await compute_project_rag(db_session, project) == RagStatus.GREY
+
+
+async def test_rag_is_green_for_a_clean_accepted_assessment(db_session: AsyncSession) -> None:
+    org = await _make_tenant_and_org(db_session)
+    await _make_stages(db_session, 1)
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+    # No domains at all — vacuously clean, same as
+    # test_opboh_scoring.py::test_empty_assessment_scores_zero_but_is_vacuously_clean.
+    await _make_assessment(db_session, org, status=OpbohAssessmentStatus.ACCEPTED, project=project)
+
+    assert await compute_project_rag(db_session, project) == RagStatus.GREEN
+
+
+async def test_rag_is_red_when_a_critical_control_has_failed(db_session: AsyncSession) -> None:
+    org = await _make_tenant_and_org(db_session)
+    await _make_stages(db_session, 1)
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+    assessment = await _make_assessment(
+        db_session, org, status=OpbohAssessmentStatus.CONDITIONALLY_ACCEPTED, project=project
+    )
+    domain = OpbohDomain(
+        id=uuid.uuid4(),
+        framework_version_id=assessment.framework_version_id,
+        code="sponsor",
+        name="Sponsor Readiness",
+        weight=1.0,
+        min_score_threshold=0.6,
+    )
+    db_session.add(domain)
+    await db_session.flush()
+    db_session.add(
+        OpbohQuestion(
+            id=uuid.uuid4(),
+            domain_id=domain.id,
+            control_objective="Sponsor has clear legal existence",
+            question_text="Is the sponsor a validly registered legal entity?",
+            is_critical_control=True,
+            pass_threshold=1.0,
+        )
+    )
+    await db_session.flush()
+
+    assert await compute_project_rag(db_session, project) == RagStatus.RED
+
+
+# ---------------------------------------------------------------------------
+# list_open_findings_for_project — Epic 5 gap-closing
+# ---------------------------------------------------------------------------
+
+
+async def test_list_open_findings_excludes_closed_ones(db_session: AsyncSession) -> None:
+    org = await _make_tenant_and_org(db_session)
+    await _make_stages(db_session, 1)
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+    assessment = await _make_assessment(
+        db_session, org, status=OpbohAssessmentStatus.CONDITIONALLY_ACCEPTED, project=project
+    )
+    db_session.add_all(
+        [
+            OpbohFinding(
+                id=uuid.uuid4(),
+                tenant_id=org.tenant_id,
+                assessment_id=assessment.id,
+                severity=FindingSeverity.HIGH,
+                description="Open finding",
+                status=FindingStatus.OPEN,
+                created_by="alice",
+                updated_by="alice",
+            ),
+            OpbohFinding(
+                id=uuid.uuid4(),
+                tenant_id=org.tenant_id,
+                assessment_id=assessment.id,
+                severity=FindingSeverity.LOW,
+                description="In-progress finding",
+                status=FindingStatus.IN_PROGRESS,
+                created_by="alice",
+                updated_by="alice",
+            ),
+            OpbohFinding(
+                id=uuid.uuid4(),
+                tenant_id=org.tenant_id,
+                assessment_id=assessment.id,
+                severity=FindingSeverity.MEDIUM,
+                description="Closed finding",
+                status=FindingStatus.CLOSED,
+                created_by="alice",
+                updated_by="alice",
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    findings = await list_open_findings_for_project(db_session, project)
+
+    assert {f.description for f in findings} == {"Open finding", "In-progress finding"}

@@ -71,3 +71,27 @@ class FrameworkVersion(Base, AuditedMixin):
     effective_from: Mapped[date] = mapped_column(Date, nullable=False)
     effective_until: Mapped[date | None] = mapped_column(Date)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class FrameworkApplicabilityRule(Base, AuditedMixin):
+    """Epic 4's real ticket list (FR-AGA-001…002) calls for applicability
+    "by sector / jurisdiction / risk / stage" — a full rules engine across
+    all four dimensions. This is deliberately a smaller MVP slice: sector
+    only, no jurisdiction/risk matching yet, and a framework with zero
+    rules is treated as applicable to every project by default (matches
+    how OPBOH already behaves today — any org can start an OPBOH
+    assessment unconditionally, no rule gates it). A framework gets
+    filtered only once it actually has rules recorded against it. Not
+    tenant-scoped, same reasoning as Framework/Stage: shared platform
+    configuration.
+    """
+
+    __tablename__ = "framework_applicability_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    framework_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("frameworks.id"), nullable=False
+    )
+    sector: Mapped[str | None] = mapped_column(
+        String(100), doc="Null means this rule matches any sector."
+    )

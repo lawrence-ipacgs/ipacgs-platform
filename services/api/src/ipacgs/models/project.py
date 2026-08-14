@@ -27,10 +27,10 @@ Two design choices worth calling out:
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -73,6 +73,12 @@ class Project(Base, TenantScopedMixin, AuditedMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
 
+    # Free-text for Milestone 1.1, same reasoning as Organisation.organisation_type
+    # — becomes a controlled vocabulary once a second sector shows up that
+    # needs one. Feeds FrameworkApplicabilityRule matching (models/framework.py).
+    sector: Mapped[str | None] = mapped_column(String(100))
+    risk_rating: Mapped[str | None] = mapped_column(String(20))
+
     current_stage_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("stages.id"), nullable=False
     )
@@ -84,9 +90,21 @@ class Project(Base, TenantScopedMixin, AuditedMixin):
         default=ProjectStatus.ACTIVE,
     )
 
+    # Single owner, not OPBOH's full preparer/assessor/reviewer/approver
+    # chain — that SOD chain already exists on whichever assessment is
+    # driving this stage; this is just "who's accountable for moving the
+    # stage itself forward", reset on every advance/reopen.
+    assigned_to: Mapped[str | None] = mapped_column(String(36))
+    stage_due_date: Mapped[date | None] = mapped_column(Date)
+
+
+class StageGateDecisionKind(StrEnum):
+    ADVANCE = "advance"
+    REOPEN = "reopen"
+
 
 class StageGateDecision(Base, TenantScopedMixin):
-    """One recorded advancement — deliberately no `updated_at`/`updated_by`
+    """One recorded transition — deliberately no `updated_at`/`updated_by`
     (no `AuditedMixin`): a gate decision is an immutable event, not a row
     anyone should be editing after the fact. Get the decision right before
     recording it, not after."""
@@ -97,6 +115,15 @@ class StageGateDecision(Base, TenantScopedMixin):
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False
     )
+    kind: Mapped[StageGateDecisionKind] = mapped_column(
+        Enum(
+            StageGateDecisionKind,
+            name="stage_gate_decision_kind",
+            values_callable=_VALUES_CALLABLE,
+        ),
+        nullable=False,
+        default=StageGateDecisionKind.ADVANCE,
+    )
     from_stage_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("stages.id"), nullable=False
     )
@@ -104,12 +131,14 @@ class StageGateDecision(Base, TenantScopedMixin):
         UUID(as_uuid=True), ForeignKey("stages.id"), nullable=False
     )
 
-    # PRN-001 — "date alone never authorizes progression". This is the
-    # column that makes the rule checkable: a StageGateDecision without a
-    # supporting assessment should never be constructible — enforced in
-    # services/stage_engine.py, not just documented here.
-    supporting_assessment_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("opboh_assessments.id"), nullable=False
+    # PRN-001 — "date alone never authorizes progression" — for an ADVANCE.
+    # Nullable because a REOPEN is a different kind of event: withdrawing
+    # confidence in prior evidence, not adding new evidence, so it has a
+    # `notes` reason instead (enforced as required for REOPEN in
+    # services/stage_engine.py, not at the schema level, same pattern as
+    # the ADVANCE requirement already used).
+    supporting_assessment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("opboh_assessments.id")
     )
 
     decided_by: Mapped[str] = mapped_column(String(36), nullable=False)
