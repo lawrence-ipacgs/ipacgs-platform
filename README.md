@@ -57,6 +57,16 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   `api/routes/evidence.py`). The catalogue currently loaded is an
   **illustrative placeholder**, not KMI Africa's real OPBOH content — see
   `scripts/seed_opboh_catalogue.py`'s docstring.
+- **Epic 4 — Framework Registry**: a generic `Framework`/`FrameworkVersion`
+  registry (`models/framework.py`, `services/framework_registry.py`,
+  `api/routes/framework.py`) that OPBOH is now registered *into* rather than
+  sitting outside of — so a second framework doesn't mean a second
+  copy-pasted set of tables. OPBOH's own catalogue tables are unchanged;
+  `OpbohFrameworkVersion` just gained a `framework_id` pointing at its
+  registry entry (migration `0003_framework_registry`).
+- **Release pipeline**: `.github/workflows/release-dev.yml` builds and
+  deploys a real image to `dev` on every push to `main`, OIDC-authenticated,
+  no stored Azure credentials — see `infra/README.md` § Release pipeline.
 
 See the architecture document's Section 4 (work breakdown) for the full ticket
 list each epic implements, and Section 6 for what's next.

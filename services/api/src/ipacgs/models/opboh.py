@@ -56,6 +56,18 @@ class OpbohFrameworkVersion(Base, AuditedMixin):
     __tablename__ = "opboh_framework_versions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Nullable, not required: tightening this to NOT NULL would force every
+    # existing test fixture that builds an OpbohFrameworkVersion directly
+    # (there are several, across test_opboh_scoring.py, workflow, routes)
+    # to also construct a Framework row it has no other use for. Migration
+    # `0003_framework_registry` backfills every pre-existing row to point
+    # at a registered Framework(code="OPBOH") — this column is null only
+    # for rows created without going through the registry, which after
+    # that migration should be none. A known, flagged gap, same pattern as
+    # OpbohAssessment.organisation_id's placeholder-until-Epic-5 note below.
+    framework_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("frameworks.id")
+    )
     version_label: Mapped[str] = mapped_column(
         String(20), nullable=False, unique=True, doc="e.g. '1.1'"
     )
