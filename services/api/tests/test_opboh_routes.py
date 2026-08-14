@@ -238,6 +238,16 @@ async def test_creating_an_assessment_for_an_unknown_organisation_is_404(
 
 
 async def _make_project(db_session: AsyncSession, organisation: Organisation) -> Project:
+    """Commits for real (the client's route handlers use a separate
+    session, same reason test_project_routes.py's fixtures commit) —
+    this stage is only here to satisfy Project.current_stage_id's FK, no
+    test in this file cares whether it stays active afterward, so it's
+    deactivated immediately rather than left active for the rest of the
+    session to trip over. This exact leak (a committed active Stage from
+    an unrelated test winning stage_engine.create_project's "globally
+    lowest sequence" query) is what broke test_project_routes.py's own
+    tests over in CI — see that file's two_stages fixture teardown for
+    the original writeup; this helper just didn't have one yet."""
     stage = Stage(
         id=uuid.uuid4(),
         code=f"stg-{uuid.uuid4().hex[:8]}",
@@ -261,6 +271,10 @@ async def _make_project(db_session: AsyncSession, organisation: Organisation) ->
     )
     db_session.add(project)
     await db_session.commit()
+
+    stage.is_active = False
+    await db_session.commit()
+
     return project
 
 
