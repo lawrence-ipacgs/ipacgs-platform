@@ -19,6 +19,7 @@ from ipacgs.models.opboh import (
 )
 from ipacgs.models.organisation import Organisation, OrganisationDuplicateCheck
 from ipacgs.models.person import Person
+from ipacgs.models.project import Project, ProjectStatus, Stage, StageGateDecision
 from ipacgs.models.tenant import Tenant, TenantStatus
 
 __all__ = [
@@ -42,6 +43,10 @@ __all__ = [
     "Organisation",
     "OrganisationDuplicateCheck",
     "Person",
+    "Project",
+    "ProjectStatus",
+    "Stage",
+    "StageGateDecision",
     "Tenant",
     "TenantStatus",
 ]

@@ -39,6 +39,7 @@ pip install -e ".[dev]"
 cp .env.example .env   # fill in local values — never commit .env
 alembic upgrade head
 python -m ipacgs.scripts.seed_opboh_catalogue   # illustrative catalogue — see that file's docstring
+python -m ipacgs.scripts.seed_stages            # illustrative S1-S4 sequence — see that file's docstring
 uvicorn ipacgs.main:app --reload
 ```
 
@@ -64,6 +65,16 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   copy-pasted set of tables. OPBOH's own catalogue tables are unchanged;
   `OpbohFrameworkVersion` just gained a `framework_id` pointing at its
   registry entry (migration `0003_framework_registry`).
+- **Epic 5 — Stage Engine**: the `Project` entity OPBOH's own model comments
+  had been pointing at as a placeholder since Epic 3, plus the stage-gate
+  mechanism PRN-001 depends on (`models/project.py`,
+  `services/stage_engine.py`, `api/routes/project.py`). Stages are
+  configuration (an ordered `Stage` table), not a hardcoded enum — the
+  confirmed real stage list from KMI Africa's SRS hasn't been shared into
+  this repo either, same situation OPBOH's catalogue was in; what's seeded
+  by `scripts/seed_stages.py` is an **illustrative** S1–S4 sequence.
+  Advancing a project's stage requires an accepted OPBOH assessment for
+  the same organisation — never just a date.
 - **Release pipeline**: `.github/workflows/release-dev.yml` builds and
   deploys a real image to `dev` on every push to `main`, OIDC-authenticated,
   no stored Azure credentials — see `infra/README.md` § Release pipeline.
