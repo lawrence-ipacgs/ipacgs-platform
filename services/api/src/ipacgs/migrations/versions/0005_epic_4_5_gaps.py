@@ -52,11 +52,22 @@ def upgrade() -> None:
     op.add_column("projects", sa.Column("assigned_to", sa.String(36)))
     op.add_column("projects", sa.Column("stage_due_date", sa.Date()))
 
+    # Unlike opboh_assessment_status/project_status in earlier migrations
+    # (both created inline as part of create_table, where SQLAlchemy's DDL
+    # compiler auto-creates a referenced enum type as a dependency), a
+    # bare `op.add_column` on an *existing* table does not — the type has
+    # to exist before the ALTER TABLE runs, or Postgres errors with
+    # "type ... does not exist" (caught by CI: the ADD COLUMN statement
+    # ran with no CREATE TYPE ever having happened first).
+    stage_gate_decision_kind = postgresql.ENUM(
+        "advance", "reopen", name="stage_gate_decision_kind", create_type=False
+    )
+    stage_gate_decision_kind.create(op.get_bind(), checkfirst=True)
     op.add_column(
         "stage_gate_decisions",
         sa.Column(
             "kind",
-            sa.Enum("advance", "reopen", name="stage_gate_decision_kind"),
+            stage_gate_decision_kind,
             nullable=False,
             server_default="advance",
         ),
