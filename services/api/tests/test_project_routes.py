@@ -59,7 +59,7 @@ async def organisation(db_session: AsyncSession) -> Organisation:
 
 
 @pytest.fixture
-async def two_stages(db_session: AsyncSession) -> tuple[Stage, Stage]:
+async def two_stages(db_session: AsyncSession) -> AsyncGenerator[tuple[Stage, Stage], None]:
     base = uuid.uuid4().int % 1_000_000 * 100
     stage_a = Stage(
         id=uuid.uuid4(),
@@ -81,7 +81,23 @@ async def two_stages(db_session: AsyncSession) -> tuple[Stage, Stage]:
     )
     db_session.add_all([stage_a, stage_b])
     await db_session.commit()
-    return stage_a, stage_b
+    try:
+        yield stage_a, stage_b
+    finally:
+        # This is what actually broke test_stage_engine.py: spacing this
+        # fixture's own sequence range apart from other tests protects
+        # advance_stage's *relative* "next stage after X" query, but
+        # create_project's "the globally lowest active stage" has no
+        # reference point to space against — a committed row from any
+        # earlier test with a lower sequence wins regardless. Committing
+        # is unavoidable here (route handlers use a separate session than
+        # this fixture's db_session, so the client can't see this data
+        # otherwise) — deactivating on the way out is what keeps it from
+        # outliving this test in a schema that's only ever torn down once,
+        # at the end of the whole session (see conftest.py's `_schema`).
+        stage_a.is_active = False
+        stage_b.is_active = False
+        await db_session.commit()
 
 
 async def _accepted_assessment(db_session: AsyncSession, org: Organisation) -> OpbohAssessment:
