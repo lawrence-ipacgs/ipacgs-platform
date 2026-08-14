@@ -161,12 +161,19 @@ class OpbohAssessment(Base, TenantScopedMixin, AuditedMixin):
     framework_version_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("opboh_framework_versions.id"), nullable=False
     )
-    # Tied to Organisation, not a Project, because no Project model exists
-    # yet in Milestone 1.1's schema (Layer 4's stage engine owns that). This
-    # is a known, deliberate placeholder — see docs/architecture.md — not an
-    # oversight; revisit once Epic 5 introduces a real Project entity.
+    # Tied to Organisation, not (only) a Project, because Milestone 1.1's
+    # earliest OPBOH assessments genuinely predate any Project existing —
+    # sponsor/opportunity screening happens before there's a project to
+    # attach to. Epic 5 added project_id below rather than replacing this:
+    # both stay populated where they apply, organisation_id never becomes
+    # optional. See models/project.py's module docstring for why the FK
+    # points at OpbohAssessment specifically rather than a generic
+    # "Assessment" table that doesn't exist yet.
     organisation_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organisations.id"), nullable=False
+    )
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id")
     )
 
     status: Mapped[OpbohAssessmentStatus] = mapped_column(
