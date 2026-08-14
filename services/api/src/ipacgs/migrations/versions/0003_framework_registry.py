@@ -18,6 +18,7 @@ Revises: 0002
 Create Date: 2026-08-14
 """
 
+import uuid
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -29,7 +30,7 @@ down_revision: Union[str, None] = "0002"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-_OPBOH_FRAMEWORK_ID = "8f14e45f-ceea-4c94-8b8a-9a5b1e6f5a01"
+_OPBOH_FRAMEWORK_ID = uuid.UUID("8f14e45f-ceea-4c94-8b8a-9a5b1e6f5a01")
 
 
 def upgrade() -> None:
@@ -86,27 +87,39 @@ def upgrade() -> None:
     )
 
     # Register OPBOH itself, then backfill every pre-existing catalogue
-    # version to point at it.
+    # version to point at it. Real bind parameters, not an f-string —
+    # bandit's B608 correctly flags string-built SQL as a pattern
+    # regardless of whether the interpolated value happens to be a
+    # hardcoded constant here; a genuinely parameterized statement is the
+    # actually-safe version of this, not a suppressed warning about one
+    # that only happens to be safe today.
     op.execute(
-        f"""
-        INSERT INTO frameworks (id, code, name, description, is_active, created_by, updated_by)
-        VALUES (
-            '{_OPBOH_FRAMEWORK_ID}',
-            'OPBOH',
-            'Organisational and Project Bill of Health',
-            'IPAC rule 1001-008-01 — FW-OPBOH-001…015. See models/opboh.py.',
-            true,
-            'migration-0003',
-            'migration-0003'
+        sa.text(
+            "INSERT INTO frameworks "
+            "(id, code, name, description, is_active, created_by, updated_by) "
+            "VALUES (:id, :code, :name, :description, :is_active, :created_by, :updated_by)"
+        ).bindparams(
+            sa.bindparam("id", value=_OPBOH_FRAMEWORK_ID, type_=postgresql.UUID(as_uuid=True)),
+            sa.bindparam("code", value="OPBOH"),
+            sa.bindparam("name", value="Organisational and Project Bill of Health"),
+            sa.bindparam(
+                "description",
+                value="IPAC rule 1001-008-01 — FW-OPBOH-001…015. See models/opboh.py.",
+            ),
+            sa.bindparam("is_active", value=True),
+            sa.bindparam("created_by", value="migration-0003"),
+            sa.bindparam("updated_by", value="migration-0003"),
         )
-        """
     )
     op.execute(
-        f"""
-        UPDATE opboh_framework_versions
-        SET framework_id = '{_OPBOH_FRAMEWORK_ID}'
-        WHERE framework_id IS NULL
-        """
+        sa.text(
+            "UPDATE opboh_framework_versions SET framework_id = :framework_id "
+            "WHERE framework_id IS NULL"
+        ).bindparams(
+            sa.bindparam(
+                "framework_id", value=_OPBOH_FRAMEWORK_ID, type_=postgresql.UUID(as_uuid=True)
+            )
+        )
     )
 
 
