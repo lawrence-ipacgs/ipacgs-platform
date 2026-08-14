@@ -96,9 +96,20 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
           identity: apiIdentity.id
         }
       ]
-      // No `secrets:` block — the Key Vault URI isn't sensitive (it's a
-      // hostname), so it's passed as a plain env var below rather than
-      // routed through the secrets mechanism meant for actual secrets.
+      // The Key Vault URI itself isn't sensitive (it's a hostname), so
+      // it's passed as a plain env var below. The DB connection string
+      // is — Container Apps fetches it directly from Key Vault using the
+      // API's own identity (already granted Key Vault Secrets User
+      // above), so the actual value never appears in this template, an
+      // `az containerapp` command, or GitHub — only a reference to where
+      // it lives.
+      secrets: [
+        {
+          name: 'database-url'
+          keyVaultUrl: '${keyVaultUri}secrets/postgres-connection-string'
+          identity: apiIdentity.id
+        }
+      ]
     }
     template: {
       containers: [
@@ -112,6 +123,7 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'ENVIRONMENT', value: environment }
             { name: 'KEY_VAULT_URI', value: keyVaultUri }
             { name: 'AZURE_CLIENT_ID', value: apiIdentity.properties.clientId }
+            { name: 'DATABASE_URL', secretRef: 'database-url' }
           ]
           resources: {
             cpu: json(environment == 'prod' ? '1.0' : '0.5')
