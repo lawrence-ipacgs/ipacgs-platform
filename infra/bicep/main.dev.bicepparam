@@ -4,12 +4,16 @@ param environment = 'dev'
 param location = 'southafricanorth'
 param projectPrefix = 'ipacgs'
 
-// Replace with a real Entra ID object ID before deploying — see
-// infra/README.md § First deployment. Defaults to your own account
-// (platformAdminPrincipalType = 'User' in main.bicep) so this works without
-// Groups Administrator rights; switch both params if/when a real
-// platform-admins group exists.
-param platformAdminObjectId = '00000000-0000-0000-0000-000000000000'
+// Lawrence's own object ID (az ad signed-in-user show) — the account that
+// ran the original Epic 0 deploy. Committed rather than left as a
+// placeholder for a local edit: the first deploy used a real value that
+// only ever existed as an uncommitted Cloud Shell edit, which a later
+// `git pull` silently reverted to the placeholder and broke a redeploy
+// (PrincipalNotFound on an all-zero GUID) — not a secret, just an
+// object ID, so there's no reason not to check it in. Switch both this
+// and platformAdminPrincipalType (main.bicep) if/when a real
+// platform-admins group replaces a single named admin.
+param platformAdminObjectId = '5a8af707-9fd3-45d1-ace9-45d0b9fab3f9'
 
 param postgresAdminLogin = 'ipacgsadmin'
 // Read from the environment at deploy time, not hardcoded — .bicepparam
