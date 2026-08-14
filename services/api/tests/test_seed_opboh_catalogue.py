@@ -1,6 +1,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ipacgs.models.framework import Framework
 from ipacgs.models.opboh import OpbohDomain, OpbohFrameworkVersion, OpbohQuestion
 from ipacgs.scripts.seed_opboh_catalogue import CATALOGUE, ILLUSTRATIVE_VERSION_LABEL, seed
 
@@ -15,6 +16,13 @@ async def test_seed_creates_the_expected_catalogue_shape(db_session: AsyncSessio
     )
     version = version_result.scalars().one()
     assert version.is_active is True
+
+    # Epic 4 — the version must be registered under the Framework Registry's
+    # OPBOH entry, not floating unlinked.
+    assert version.framework_id is not None
+    framework = await db_session.get(Framework, version.framework_id)
+    assert framework is not None
+    assert framework.code == "OPBOH"
 
     domain_count = await db_session.scalar(
         select(func.count())

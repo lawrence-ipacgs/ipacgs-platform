@@ -4,6 +4,7 @@ generally) sees the full schema from a single import of this package."""
 from ipacgs.models.audit_event import AuditAction, AuditEvent
 from ipacgs.models.base import Base
 from ipacgs.models.evidence import EvidenceDocument, EvidenceStatus
+from ipacgs.models.framework import Framework, FrameworkVersion
 from ipacgs.models.opboh import (
     FindingSeverity,
     FindingStatus,
@@ -28,6 +29,8 @@ __all__ = [
     "EvidenceStatus",
     "FindingSeverity",
     "FindingStatus",
+    "Framework",
+    "FrameworkVersion",
     "OpbohAssessment",
     "OpbohAssessmentStatus",
     "OpbohDomain",

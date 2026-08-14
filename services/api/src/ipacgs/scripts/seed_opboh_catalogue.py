@@ -28,10 +28,16 @@ from datetime import date
 from sqlalchemy import select
 
 from ipacgs.core.db import async_session_factory, engine
+from ipacgs.models.framework import Framework
 from ipacgs.models.opboh import OpbohDomain, OpbohFrameworkVersion, OpbohQuestion
 
 ILLUSTRATIVE_VERSION_LABEL = "illus-0.1"
 SEED_ACTOR = "seed-script"
+# Matches migration 0003_framework_registry's own OPBOH row — this script
+# reuses it rather than registering a second one, since `Framework.code`
+# is unique and a fresh `az deployment`'d database already has it from
+# that migration by the time this script ever runs.
+_OPBOH_FRAMEWORK_CODE = "OPBOH"
 
 
 @dataclass(frozen=True)
@@ -165,8 +171,30 @@ async def seed() -> None:
             print(f"Illustrative catalogue {ILLUSTRATIVE_VERSION_LABEL!r} already seeded.")
             return
 
+        # Get-or-create rather than assuming migration 0003 already
+        # registered OPBOH: this script is meant to be runnable on its
+        # own, not only ever immediately after a fresh `alembic upgrade
+        # head` — the same reasoning as the version-label check above.
+        framework_result = await session.execute(
+            select(Framework).where(Framework.code == _OPBOH_FRAMEWORK_CODE)
+        )
+        framework = framework_result.scalars().first()
+        if framework is None:
+            framework = Framework(
+                id=uuid.uuid4(),
+                code=_OPBOH_FRAMEWORK_CODE,
+                name="Organisational and Project Bill of Health",
+                description="IPAC rule 1001-008-01 — FW-OPBOH-001…015. See models/opboh.py.",
+                is_active=True,
+                created_by=SEED_ACTOR,
+                updated_by=SEED_ACTOR,
+            )
+            session.add(framework)
+            await session.flush()
+
         version = OpbohFrameworkVersion(
             id=uuid.uuid4(),
+            framework_id=framework.id,
             version_label=ILLUSTRATIVE_VERSION_LABEL,
             effective_from=date.today(),
             is_active=True,
