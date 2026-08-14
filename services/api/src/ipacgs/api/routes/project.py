@@ -1,4 +1,5 @@
-"""Stage Engine HTTP routes — Epic 5.
+"""Stage Engine HTTP routes — Epic 5, plus the Epic 4/5 gap-closing work
+(applicable-frameworks, reopen-stage, RAG, assignment, open-findings).
 
 Role-based authorization is not wired in yet, same gap and same reason as
 `api/routes/opboh.py` and `api/routes/framework.py`. Every route still
@@ -11,19 +12,25 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ipacgs.api.schemas.framework import FrameworkOut
+from ipacgs.api.schemas.opboh import FindingOut
 from ipacgs.api.schemas.project import (
     AdvanceStageRequest,
+    AssignStageRequest,
     CreateProjectRequest,
     ProjectOut,
+    RagOut,
+    ReopenStageRequest,
     StageGateDecisionOut,
     StageOut,
 )
 from ipacgs.core.db import get_db
 from ipacgs.core.security import CurrentUser, get_current_user
-from ipacgs.models.opboh import OpbohAssessment
+from ipacgs.models.framework import Framework
+from ipacgs.models.opboh import OpbohAssessment, OpbohFinding
 from ipacgs.models.organisation import Organisation
 from ipacgs.models.project import Project, Stage, StageGateDecision
-from ipacgs.services import stage_engine
+from ipacgs.services import framework_applicability, stage_engine
 
 router = APIRouter(tags=["projects"])
 
@@ -58,6 +65,8 @@ async def create_project(
             organisation_id=organisation.id,
             name=body.name,
             description=body.description,
+            sector=body.sector,
+            risk_rating=body.risk_rating,
             actor=user.object_id,
         )
     except stage_engine.NoStagesConfigured as exc:
@@ -104,6 +113,47 @@ async def advance_stage_route(
     return decision
 
 
+@router.post("/projects/{project_id}/reopen-stage", response_model=StageGateDecisionOut)
+async def reopen_stage_route(
+    project_id: uuid.UUID,
+    body: ReopenStageRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> StageGateDecision:
+    project = await _get_project_or_404(db, project_id)
+
+    try:
+        decision = await stage_engine.reopen_stage(
+            db,
+            project,
+            target_stage_id=body.target_stage_id,
+            actor=user.object_id,
+            reason=body.reason,
+        )
+    except stage_engine.IllegalStageAdvancement as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+
+    await db.commit()
+    await db.refresh(decision)
+    return decision
+
+
+@router.post("/projects/{project_id}/assign", response_model=ProjectOut)
+async def assign_stage_route(
+    project_id: uuid.UUID,
+    body: AssignStageRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> Project:
+    project = await _get_project_or_404(db, project_id)
+    project = await stage_engine.assign_stage(
+        db, project, assigned_to=body.assigned_to, due_date=body.due_date, actor=user.object_id
+    )
+    await db.commit()
+    await db.refresh(project)
+    return project
+
+
 @router.get("/projects/{project_id}/stage-history", response_model=list[StageGateDecisionOut])
 async def stage_history(
     project_id: uuid.UUID, db: AsyncSession = Depends(get_db)
@@ -115,3 +165,26 @@ async def stage_history(
         .order_by(StageGateDecision.decided_at)
     )
     return list(result.scalars().all())
+
+
+@router.get("/projects/{project_id}/rag", response_model=RagOut)
+async def project_rag(project_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> RagOut:
+    project = await _get_project_or_404(db, project_id)
+    status_value = await stage_engine.compute_project_rag(db, project)
+    return RagOut(status=status_value)
+
+
+@router.get("/projects/{project_id}/open-findings", response_model=list[FindingOut])
+async def project_open_findings(
+    project_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+) -> list[OpbohFinding]:
+    project = await _get_project_or_404(db, project_id)
+    return await stage_engine.list_open_findings_for_project(db, project)
+
+
+@router.get("/projects/{project_id}/applicable-frameworks", response_model=list[FrameworkOut])
+async def applicable_frameworks(
+    project_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+) -> list[Framework]:
+    project = await _get_project_or_404(db, project_id)
+    return await framework_applicability.applicable_frameworks_for_project(db, project)

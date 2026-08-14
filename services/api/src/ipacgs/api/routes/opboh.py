@@ -40,6 +40,7 @@ from ipacgs.models.opboh import (
     OpbohResponseEvidence,
 )
 from ipacgs.models.organisation import Organisation
+from ipacgs.models.project import Project
 from ipacgs.services import opboh_findings, opboh_workflow
 from ipacgs.services.opboh_query import compute_assessment_score
 from ipacgs.services.opboh_scoring import AssessmentResult
@@ -100,6 +101,17 @@ async def create_assessment(
     if organisation is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No organisation {body.organisation_id}.")
 
+    if body.project_id is not None:
+        project = await db.get(Project, body.project_id)
+        if project is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"No project {body.project_id}.")
+        if project.organisation_id != organisation.id:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Project {body.project_id} belongs to a different organisation "
+                f"than {body.organisation_id}.",
+            )
+
     framework_version_id = body.framework_version_id
     if framework_version_id is None:
         active = await db.execute(
@@ -118,6 +130,7 @@ async def create_assessment(
         tenant_id=organisation.tenant_id,
         framework_version_id=framework_version_id,
         organisation_id=organisation.id,
+        project_id=body.project_id,
         status=OpbohAssessmentStatus.DRAFT,
         prepared_by=user.object_id,
         has_critical_failure=False,
