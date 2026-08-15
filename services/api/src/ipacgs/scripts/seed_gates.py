@@ -4,8 +4,13 @@ SRS describes Gate 0-10), just enough of a placeholder to exercise the
 mechanism — quorum, voting, non-bypassable Hold, certificates — for real.
 
 Requires scripts/seed_stages.py to have already run: these gates are
-defined to trigger at stages "S1" and "S2" from that illustrative
-sequence, looked up by code. Run this after seed_stages, not before.
+defined to trigger at two of the real Intake & Screening stages from
+that sequence ("INTK-SUBMIT" and "INTK-INTEGRITY"), looked up by code.
+Run this after seed_stages, not before. Re-pointed from the old
+illustrative "S1"/"S2" codes now that seed_stages.py seeds UACOC's real
+Phase 1 stage names — the gates themselves are still illustrative; UACOC's
+own process-map document doesn't describe a gate/quorum-vote mechanism at
+all, so there's no real trigger point to source these from yet either.
 
 Run with:
     python -m ipacgs.scripts.seed_gates
@@ -40,18 +45,18 @@ GATES: tuple[SeedGate, ...] = (
     SeedGate(
         code="GATE-0",
         name="Opportunity Screening Gate",
-        description="Illustrative — sign-off before leaving S1 (Opportunity & Sponsor Readiness).",
+        description="Illustrative — sign-off before leaving INTK-SUBMIT (Project Submission).",
         sequence=10,
-        trigger_stage_code="S1",
+        trigger_stage_code="INTK-SUBMIT",
         required_quorum=1,
     ),
     SeedGate(
         code="GATE-1",
         name="Structuring Gate",
-        description="Illustrative — sign-off before leaving S2 (Site & Structuring), "
-        "two-person quorum.",
+        description="Illustrative — sign-off before leaving INTK-INTEGRITY "
+        "(Integrity Screening), two-person quorum.",
         sequence=20,
-        trigger_stage_code="S2",
+        trigger_stage_code="INTK-INTEGRITY",
         required_quorum=2,
     ),
 )
