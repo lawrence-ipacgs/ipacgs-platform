@@ -41,6 +41,7 @@ alembic upgrade head
 python -m ipacgs.scripts.seed_opboh_catalogue      # illustrative catalogue — see that file's docstring
 python -m ipacgs.scripts.seed_stages               # illustrative S1-S4 sequence — see that file's docstring
 python -m ipacgs.scripts.seed_framework_registry   # illustrative 29-framework metadata — see that file's docstring
+python -m ipacgs.scripts.seed_gates                # illustrative Gate 0/1 — run after seed_stages, see that file's docstring
 uvicorn ipacgs.main:app --reload
 ```
 
@@ -95,6 +96,19 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   X ≥ threshold"), and the UACOC intake-process mapping — that one's
   labelled a Spike in the ticket list, not a build task, and needs the
   actual 190-step document.
+- **Epic 6 — Gate Engine (Gate 0 & Gate 1)**: gate definitions
+  (`models/gate.py`), automatic readiness-pack assembly, authority/quorum/
+  conflict-checked voting, decision-scope limited to proceed/hold,
+  immutable content-hashed certificates, and suspend-on-reopen
+  (`services/gate_engine.py`, `api/routes/gate.py`). The non-bypassable
+  part is real, not just documented: `stage_engine.advance_stage` now
+  refuses to move a project past a stage with an un-PROCEEDed gate
+  attached — the one irreversible action this platform actually has is
+  what's actually blocked. Gate definitions and authority/quorum rules
+  are **illustrative** (`scripts/seed_gates.py`) — KMI's real Gate 0/1
+  rules haven't been shared yet. "Signatures" on a certificate means the
+  recorded identity of each voter, not a cryptographic signature — no
+  PKI in this platform yet for anyone to actually sign with.
 - **Release pipeline**: `.github/workflows/release-dev.yml` builds and
   deploys a real image to `dev` on every push to `main`, OIDC-authenticated,
   no stored Azure credentials — see `infra/README.md` § Release pipeline.

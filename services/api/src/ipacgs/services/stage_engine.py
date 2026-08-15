@@ -13,6 +13,7 @@ from enum import StrEnum
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ipacgs.models.gate import Gate, GateDecision, GateDecisionStatus
 from ipacgs.models.opboh import FindingStatus, OpbohAssessment, OpbohAssessmentStatus, OpbohFinding
 from ipacgs.models.project import (
     Project,
@@ -22,6 +23,14 @@ from ipacgs.models.project import (
     StageGateDecisionKind,
 )
 from ipacgs.services.opboh_query import compute_assessment_score
+
+# Deliberately importing Gate/GateDecision models here, not
+# services/gate_engine.py — gate_engine already imports RagStatus/
+# compute_project_rag/list_open_findings_for_project from this module for
+# its readiness pack, so importing gate_engine back from here would be a
+# circular import. A plain, exact-match model query costs a few lines of
+# duplication against gate_engine.gate_blocking_advancement; that's
+# cheaper than restructuring two services around avoiding it.
 
 _ACCEPTED_STATES = frozenset(
     {OpbohAssessmentStatus.ACCEPTED, OpbohAssessmentStatus.CONDITIONALLY_ACCEPTED}
@@ -103,6 +112,35 @@ async def advance_stage(
         raise IllegalStageAdvancement(
             f"Project {project.id}'s current stage {project.current_stage_id} no longer exists."
         )
+
+    # GATE-0[0-1]-006 — non-bypassable effect. If a gate is configured to
+    # trigger at the project's current stage, it must have a PROCEED
+    # decision before the project can leave that stage — an accepted
+    # assessment alone isn't enough once a gate sits in the way. This is
+    # what makes "non-bypassable" a real, enforced property rather than a
+    # documented promise: it's the one irreversible action this platform
+    # actually has (moving a project past a stage), so that's what's
+    # blocked, not an invented flag with no real consequence.
+    blocking_gate_result = await session.execute(
+        select(Gate).where(Gate.is_active.is_(True), Gate.trigger_stage_id == current_stage.id)
+    )
+    blocking_gate = blocking_gate_result.scalars().first()
+    if blocking_gate is not None:
+        decision_result = await session.execute(
+            select(GateDecision)
+            .where(GateDecision.project_id == project.id, GateDecision.gate_id == blocking_gate.id)
+            .order_by(GateDecision.created_at.desc())
+            .limit(1)
+        )
+        latest_gate_decision = decision_result.scalars().first()
+        if (
+            latest_gate_decision is None
+            or latest_gate_decision.status != GateDecisionStatus.PROCEED
+        ):
+            raise IllegalStageAdvancement(
+                f"Gate {blocking_gate.code} must reach a PROCEED decision before project "
+                f"{project.id} can advance past {current_stage.code}."
+            )
 
     next_stage_result = await session.execute(
         select(Stage)
