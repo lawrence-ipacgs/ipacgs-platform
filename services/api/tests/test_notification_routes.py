@@ -85,10 +85,18 @@ async def one_stage(db_session: AsyncSession) -> AsyncGenerator[Stage, None]:
 async def test_my_notifications_only_returns_my_own(
     client: AsyncClient, organisation: Organisation, db_session: AsyncSession
 ) -> None:
+    # These commit() for real (the client needs a separate session to see
+    # them), so — unlike Stage/Gate/OpbohFrameworkVersion, which get
+    # deactivated on the way out — recipient identifiers here must be
+    # unique per test run rather than shared literals like "alice"/"bob":
+    # there's no is_active flag on Notification to toggle off, and a
+    # committed row lives for the whole (session-scoped) test schema.
+    alice = _unique("alice")
+    bob = _unique("bob")
     await notify(
         db_session,
         tenant_id=organisation.tenant_id,
-        recipient="alice",
+        recipient=alice,
         kind=NotificationKind.ASSIGNMENT,
         entity_type="project",
         entity_id=uuid.uuid4(),
@@ -96,13 +104,13 @@ async def test_my_notifications_only_returns_my_own(
     )
     await db_session.commit()
 
-    _as("alice")
+    _as(alice)
     resp = await client.get("/me/notifications")
     assert resp.status_code == 200
-    assert all(n["recipient"] == "alice" for n in resp.json())
+    assert all(n["recipient"] == alice for n in resp.json())
     assert any(n["message"] == "For alice only." for n in resp.json())
 
-    _as("bob")
+    _as(bob)
     bob_resp = await client.get("/me/notifications")
     assert bob_resp.status_code == 200
     assert not any(n["message"] == "For alice only." for n in bob_resp.json())
@@ -114,7 +122,7 @@ async def test_mark_notification_read(
     note = await notify(
         db_session,
         tenant_id=organisation.tenant_id,
-        recipient="alice",
+        recipient=_unique("alice"),
         kind=NotificationKind.ASSIGNMENT,
         entity_type="project",
         entity_id=uuid.uuid4(),
@@ -144,7 +152,7 @@ async def test_scan_overdue_route_creates_notifications(
         name="Overdue Project",
         current_stage_id=one_stage.id,
         status=ProjectStatus.ACTIVE,
-        assigned_to="dave",
+        assigned_to=(dave := _unique("dave")),
         stage_due_date=yesterday,
         created_by="seed",
         updated_by="seed",
@@ -154,24 +162,25 @@ async def test_scan_overdue_route_creates_notifications(
 
     resp = await client.post("/notifications/scan-overdue")
     assert resp.status_code == 200, resp.text
-    assert any(n["recipient"] == "dave" for n in resp.json())
+    assert any(n["recipient"] == dave for n in resp.json())
 
 
 async def test_assigning_a_stage_sends_a_notification(
     client: AsyncClient, organisation: Organisation, one_stage: Stage
 ) -> None:
-    _as("alice")
+    erin = _unique("erin")
+    _as(_unique("alice"))
     create_resp = await client.post(
         "/projects", json={"organisation_id": str(organisation.id), "name": "Test Project"}
     )
     project_id = create_resp.json()["id"]
 
     assign_resp = await client.post(
-        f"/projects/{project_id}/assign", json={"assigned_to": "erin", "due_date": "2026-12-01"}
+        f"/projects/{project_id}/assign", json={"assigned_to": erin, "due_date": "2026-12-01"}
     )
     assert assign_resp.status_code == 200, assign_resp.text
 
-    _as("erin")
+    _as(erin)
     notes_resp = await client.get("/me/notifications")
     assert any(
         n["kind"] == "assignment" and n["entity_id"] == project_id for n in notes_resp.json()
@@ -217,14 +226,15 @@ async def test_assigning_a_finding_sends_a_notification(
     db_session.add(finding)
     await db_session.commit()
 
+    frank = _unique("frank")
     _as("alice")
     resp = await client.post(
         f"/opboh/findings/{finding.id}/assign",
-        json={"owner": "frank", "due_date": "2026-11-01"},
+        json={"owner": frank, "due_date": "2026-11-01"},
     )
     assert resp.status_code == 200, resp.text
 
-    _as("frank")
+    _as(frank)
     notes_resp = await client.get("/me/notifications")
     assert any(
         n["kind"] == "assignment" and n["entity_id"] == str(finding.id) for n in notes_resp.json()

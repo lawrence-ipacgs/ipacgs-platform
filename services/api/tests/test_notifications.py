@@ -107,10 +107,16 @@ async def test_notify_creates_an_unread_notification(db_session: AsyncSession) -
 
 async def test_list_for_recipient_filters_by_recipient(db_session: AsyncSession) -> None:
     org = await _make_tenant_and_org(db_session)
+    # Unique recipients, not literal "alice"/"bob": db_session tests never
+    # commit here (only flush — rolled back at teardown), but other test
+    # files' HTTP-level tests do commit real Notification rows against the
+    # same session-scoped schema, and Notification has no is_active flag to
+    # deactivate on the way out like Stage/Gate/OpbohFrameworkVersion do.
+    alice, bob = _unique("alice"), _unique("bob")
     await notify(
         db_session,
         tenant_id=org.tenant_id,
-        recipient="alice",
+        recipient=alice,
         kind=NotificationKind.ASSIGNMENT,
         entity_type="project",
         entity_id=uuid.uuid4(),
@@ -119,24 +125,25 @@ async def test_list_for_recipient_filters_by_recipient(db_session: AsyncSession)
     await notify(
         db_session,
         tenant_id=org.tenant_id,
-        recipient="bob",
+        recipient=bob,
         kind=NotificationKind.ASSIGNMENT,
         entity_type="project",
         entity_id=uuid.uuid4(),
         message="For bob.",
     )
 
-    alice_notes = await list_for_recipient(db_session, "alice")
+    alice_notes = await list_for_recipient(db_session, alice)
     assert len(alice_notes) == 1
     assert alice_notes[0].message == "For alice."
 
 
 async def test_list_for_recipient_unread_only(db_session: AsyncSession) -> None:
     org = await _make_tenant_and_org(db_session)
+    alice = _unique("alice")
     note = await notify(
         db_session,
         tenant_id=org.tenant_id,
-        recipient="alice",
+        recipient=alice,
         kind=NotificationKind.ASSIGNMENT,
         entity_type="project",
         entity_id=uuid.uuid4(),
@@ -144,8 +151,8 @@ async def test_list_for_recipient_unread_only(db_session: AsyncSession) -> None:
     )
     await mark_read(db_session, note)
 
-    all_notes = await list_for_recipient(db_session, "alice")
-    unread_notes = await list_for_recipient(db_session, "alice", unread_only=True)
+    all_notes = await list_for_recipient(db_session, alice)
+    unread_notes = await list_for_recipient(db_session, alice, unread_only=True)
 
     assert len(all_notes) == 1
     assert len(unread_notes) == 0
@@ -156,7 +163,7 @@ async def test_mark_read_sets_read_at(db_session: AsyncSession) -> None:
     note = await notify(
         db_session,
         tenant_id=org.tenant_id,
-        recipient="alice",
+        recipient=_unique("alice"),
         kind=NotificationKind.ASSIGNMENT,
         entity_type="project",
         entity_id=uuid.uuid4(),
