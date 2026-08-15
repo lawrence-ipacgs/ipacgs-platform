@@ -94,7 +94,7 @@ async def catalogue(
         code="sponsor",
         name="Sponsor Readiness",
         weight=1.0,
-        min_score_threshold=0.6,
+        min_score_threshold=3.0,
     )
     db_session.add(domain)
     await db_session.flush()
@@ -105,7 +105,7 @@ async def catalogue(
         control_objective="Sponsor has clear legal existence",
         question_text="Is the sponsor a validly registered legal entity?",
         is_critical_control=True,
-        pass_threshold=1.0,
+        pass_threshold=5.0,
     )
     ordinary_q = OpbohQuestion(
         id=uuid.uuid4(),
@@ -113,7 +113,7 @@ async def catalogue(
         control_objective="Sponsor has a stated track record",
         question_text="Does the sponsor have a track record on similar projects?",
         is_critical_control=False,
-        pass_threshold=0.5,
+        pass_threshold=2.5,
     )
     db_session.add_all([critical_q, ordinary_q])
     await db_session.commit()
@@ -143,7 +143,12 @@ async def test_full_lifecycle_clean_accept(
     for q in (critical_q, ordinary_q):
         answer_resp = await client.post(
             f"/opboh/assessments/{assessment_id}/responses",
-            json={"question_id": str(q.id), "score": 1.0, "evidence_sufficient": True},
+            json={
+                "question_id": str(q.id),
+                "response_value": "yes",
+                "score": 5,
+                "evidence_sufficiency_factor": 1.0,
+            },
         )
         assert answer_resp.status_code == 200, answer_resp.text
 
@@ -164,7 +169,9 @@ async def test_full_lifecycle_clean_accept(
     score_resp = await client.get(f"/opboh/assessments/{assessment_id}/score")
     assert score_resp.status_code == 200
     score_body = score_resp.json()
-    assert score_body["overall_score"] == 1.0
+    assert score_body["overall_score"] == 5.0
+    assert score_body["assurance_score"] == 100.0
+    assert score_body["rag"] == "green"
     assert score_body["has_critical_failure"] is False
     assert score_body["is_clean"] is True
 
@@ -194,11 +201,21 @@ async def test_critical_failure_blocks_accept_over_http(
     # that a decent-looking ordinary answer does not rescue this.
     await client.post(
         f"/opboh/assessments/{assessment_id}/responses",
-        json={"question_id": str(critical_q.id), "score": 0.0, "evidence_sufficient": True},
+        json={
+            "question_id": str(critical_q.id),
+            "response_value": "no",
+            "score": 0,
+            "evidence_sufficiency_factor": 1.0,
+        },
     )
     await client.post(
         f"/opboh/assessments/{assessment_id}/responses",
-        json={"question_id": str(ordinary_q.id), "score": 1.0, "evidence_sufficient": True},
+        json={
+            "question_id": str(ordinary_q.id),
+            "response_value": "yes",
+            "score": 5,
+            "evidence_sufficiency_factor": 1.0,
+        },
     )
     await client.post(f"/opboh/assessments/{assessment_id}/submit")
 

@@ -1,11 +1,18 @@
 """Seeds an ILLUSTRATIVE OPBOH catalogue — 4 domains, 8 questions.
 
-This is not KMI Africa's real OPBOH content. The actual catalogue (the
-spec deck's "827 explicit module fields, 3,700 source questions") lives in
-source PDFs that haven't been shared into this repo yet. What's here is a
-small, clearly-labeled placeholder — enough to exercise the scoring engine
-and API for real (a critical control that can actually fail, a domain
-threshold that actually gates), not a claim about what OPBOH really asks.
+This is not KMI Africa's real OPBOH content. The actual catalogue (an
+overview document puts it at "827 explicit module fields, 3,700 source
+questions" — docs/IMG-20260814-WA0011.jpg) lives in source material that
+hasn't been shared into this repo yet. What's here is a small,
+clearly-labeled placeholder — enough to exercise the scoring engine and API
+for real (a critical control that can actually fail, a domain threshold
+that actually gates), not a claim about what OPBOH really asks.
+
+Thresholds below ARE on the real scale now, though: `pass_threshold`/
+`min_score_threshold` are rescaled x5 from this file's original [0,1]
+convention to match `OpbohResponse.score`'s real 0-5 range (see
+`services/opboh_scoring.py`) — 1.0 -> 5.0 ("must fully pass"), 0.5 -> 2.5,
+0.6 -> 3.0. Same illustrative questions, real scale.
 
 Run with:
     python -m ipacgs.scripts.seed_opboh_catalogue
@@ -66,13 +73,13 @@ CATALOGUE: tuple[SeedDomain, ...] = (
         code="sponsor-readiness",
         name="Sponsor & Opportunity Readiness",
         weight=1.0,
-        min_score_threshold=0.6,
+        min_score_threshold=3.0,
         questions=(
             SeedQuestion(
                 control_objective="Sponsor has clear legal existence",
                 question_text="Is the sponsor a validly registered, existing legal entity?",
                 is_critical_control=True,
-                pass_threshold=1.0,
+                pass_threshold=5.0,
             ),
             SeedQuestion(
                 control_objective="Sponsor has documented mandate and authority",
@@ -81,7 +88,7 @@ CATALOGUE: tuple[SeedDomain, ...] = (
                     "this opportunity forward?"
                 ),
                 is_critical_control=True,
-                pass_threshold=1.0,
+                pass_threshold=5.0,
             ),
             SeedQuestion(
                 control_objective="Opportunity has a documented strategic rationale",
@@ -90,7 +97,7 @@ CATALOGUE: tuple[SeedDomain, ...] = (
                     "beneficiary value proposition?"
                 ),
                 is_critical_control=False,
-                pass_threshold=0.5,
+                pass_threshold=2.5,
             ),
         ),
     ),
@@ -98,19 +105,19 @@ CATALOGUE: tuple[SeedDomain, ...] = (
         code="site-screening",
         name="Site & Land Screening",
         weight=1.0,
-        min_score_threshold=0.6,
+        min_score_threshold=3.0,
         questions=(
             SeedQuestion(
                 control_objective="Site ownership or right-of-use is unambiguous",
                 question_text="Is site ownership or right-of-use documented and unambiguous?",
                 is_critical_control=True,
-                pass_threshold=1.0,
+                pass_threshold=5.0,
             ),
             SeedQuestion(
                 control_objective="Obvious site constraints have been screened",
                 question_text="Have obvious environmental or access constraints been screened?",
                 is_critical_control=False,
-                pass_threshold=0.5,
+                pass_threshold=2.5,
             ),
         ),
     ),
@@ -118,7 +125,7 @@ CATALOGUE: tuple[SeedDomain, ...] = (
         code="governance",
         name="Governance & Control Environment",
         weight=1.0,
-        min_score_threshold=0.6,
+        min_score_threshold=3.0,
         questions=(
             SeedQuestion(
                 control_objective="A governance structure with defined decision authority exists",
@@ -127,7 +134,7 @@ CATALOGUE: tuple[SeedDomain, ...] = (
                     "with defined decision authority?"
                 ),
                 is_critical_control=True,
-                pass_threshold=1.0,
+                pass_threshold=5.0,
             ),
             SeedQuestion(
                 control_objective="Basic financial controls are documented",
@@ -136,7 +143,7 @@ CATALOGUE: tuple[SeedDomain, ...] = (
                     "documented?"
                 ),
                 is_critical_control=False,
-                pass_threshold=0.5,
+                pass_threshold=2.5,
             ),
         ),
     ),
@@ -144,7 +151,7 @@ CATALOGUE: tuple[SeedDomain, ...] = (
         code="integrity-screening",
         name="Conflict & Integrity Screening",
         weight=1.0,
-        min_score_threshold=0.6,
+        min_score_threshold=3.0,
         questions=(
             SeedQuestion(
                 control_objective="No unresolved conflict-of-interest or sanctions flags",
@@ -153,7 +160,7 @@ CATALOGUE: tuple[SeedDomain, ...] = (
                     "no unresolved red flags?"
                 ),
                 is_critical_control=True,
-                pass_threshold=1.0,
+                pass_threshold=5.0,
             ),
         ),
     ),

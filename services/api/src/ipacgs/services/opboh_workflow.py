@@ -146,7 +146,7 @@ async def decide(
     decision: OpbohAssessmentStatus,
     actor: str,
     has_critical_failure: bool,
-    overall_score: float,
+    assurance_score: float,
     decision_summary: str | None,
     correlation_id: uuid.UUID,
 ) -> TransitionResult:
@@ -181,7 +181,7 @@ async def decide(
     assessment.status = decision
     assessment.approved_by = actor
     assessment.has_critical_failure = has_critical_failure
-    assessment.overall_score = overall_score
+    assessment.assurance_score = assurance_score
     assessment.decision_summary = decision_summary
 
     audit_action = (
@@ -199,7 +199,7 @@ async def decide(
         after_values={
             "status": assessment.status.value,
             "approved_by": actor,
-            "overall_score": overall_score,
+            "assurance_score": assurance_score,
             "has_critical_failure": has_critical_failure,
         },
     )

@@ -8,7 +8,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ipacgs.models.opboh import FindingSeverity, FindingStatus, OpbohAssessmentStatus
+from ipacgs.models.opboh import (
+    FindingSeverity,
+    FindingStatus,
+    OpbohAssessmentStatus,
+    OpbohResponseValue,
+)
 
 
 class CreateAssessmentRequest(BaseModel):
@@ -37,7 +42,7 @@ class AssessmentOut(BaseModel):
     assessed_by: str | None
     reviewed_by: str | None
     approved_by: str | None
-    overall_score: float | None
+    assurance_score: float | None = Field(description="0-100. See services/opboh_scoring.py.")
     has_critical_failure: bool
     decision_summary: str | None
     created_at: datetime
@@ -46,8 +51,9 @@ class AssessmentOut(BaseModel):
 
 class UpsertResponseRequest(BaseModel):
     question_id: uuid.UUID
-    score: float = Field(ge=0.0, le=1.0)
-    evidence_sufficient: bool | None = None
+    response_value: OpbohResponseValue
+    score: int = Field(ge=0, le=5, description="0-5 Likert scale — see OpbohResponse.score.")
+    evidence_sufficiency_factor: float | None = Field(default=None, ge=0.5, le=1.0)
     notes: str | None = None
     evidence_document_ids: list[uuid.UUID] = Field(default_factory=list)
 
@@ -58,8 +64,9 @@ class ResponseOut(BaseModel):
     id: uuid.UUID
     assessment_id: uuid.UUID
     question_id: uuid.UUID
-    score: float | None
-    evidence_sufficient: bool | None
+    response_value: OpbohResponseValue | None
+    score: int | None
+    evidence_sufficiency_factor: float | None
     notes: str | None
     answered_by: str | None
     answered_at: datetime | None
@@ -79,14 +86,17 @@ class CriticalFailureOut(BaseModel):
 class DomainResultOut(BaseModel):
     domain_id: str
     name: str
-    score: float
+    score: float = Field(description="0-5, weighted average of this domain's answered questions.")
     meets_threshold: bool
     critical_failures: list[CriticalFailureOut]
     unanswered_count: int
 
 
 class ScoreOut(BaseModel):
-    overall_score: float
+    overall_score: float = Field(description="0-5, weighted across domains.")
+    evidence_sufficiency_factor: float = Field(description="0.5-1.0, aggregated across responses.")
+    assurance_score: float = Field(description="0-100 = (overall_score/5*100) x evidence factor.")
+    rag: str = Field(description="red/amber/green — the real Assurance Score banding.")
     is_clean: bool
     has_critical_failure: bool
     domain_results: list[DomainResultOut]

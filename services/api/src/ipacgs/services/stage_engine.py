@@ -268,7 +268,11 @@ async def assign_stage(
 class RagStatus(StrEnum):
     """Computed, not stored — same reasoning as opboh_scoring's
     AssessmentResult: derived from the project's latest assessment every
-    time it's asked for, never a column that could go stale."""
+    time it's asked for, never a column that could go stale. RED/AMBER/GREEN
+    mirror opboh_scoring.RagBand's real Assurance Score banding exactly
+    (this project-level wrapper just adds GREY, for "no assessment linked
+    to this project yet" — a case the assessment-level RagBand has no
+    concept of)."""
 
     RED = "red"
     AMBER = "amber"
@@ -288,11 +292,7 @@ async def compute_project_rag(session: AsyncSession, project: Project) -> RagSta
         return RagStatus.GREY
 
     score = await compute_assessment_score(session, assessment)
-    if score.has_critical_failure:
-        return RagStatus.RED
-    if score.is_clean:
-        return RagStatus.GREEN
-    return RagStatus.AMBER
+    return RagStatus(score.rag.value)
 
 
 async def list_open_findings_for_project(

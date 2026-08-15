@@ -18,6 +18,7 @@ from ipacgs.services.opboh_scoring import (
     AssessmentResult,
     DomainInput,
     QuestionScore,
+    ResponseValue,
     score_assessment,
 )
 
@@ -57,8 +58,15 @@ async def compute_assessment_score(
                     control_objective=question.control_objective,
                     is_critical_control=question.is_critical_control,
                     pass_threshold=question.pass_threshold,
+                    response_value=(
+                        ResponseValue(response.response_value.value)
+                        if response and response.response_value
+                        else None
+                    ),
                     score=response.score if response else None,
-                    evidence_sufficient=response.evidence_sufficient if response else None,
+                    evidence_sufficiency_factor=(
+                        response.evidence_sufficiency_factor if response else None
+                    ),
                 )
             )
         domain_inputs.append(

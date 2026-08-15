@@ -57,9 +57,18 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   (`services/opboh_scoring.py`), the assessment state machine and
   segregation-of-duties enforcement (`services/opboh_workflow.py`), findings,
   and 19 HTTP routes exposing all of it (`api/routes/opboh.py`,
-  `api/routes/evidence.py`). The catalogue currently loaded is an
-  **illustrative placeholder**, not KMI Africa's real OPBOH content — see
-  `scripts/seed_opboh_catalogue.py`'s docstring.
+  `api/routes/evidence.py`). The catalogue content is still an
+  **illustrative placeholder**, not KMI Africa's real OPBOH question bank —
+  see `scripts/seed_opboh_catalogue.py`'s docstring. The *scoring* is real,
+  though: a Yes/No/N-A response type, a 0-5 score, a per-response Evidence
+  Sufficiency Factor (0.5-1.0), and a real Assurance Score formula
+  (`weighted score x evidence factor`, banded >=80 Green / 60-79 Amber /
+  <60 Red, any critical failure forcing automatic Red) — sourced from an
+  OPBOH Full-Cycle Assessment Module v1.1 overview KMI shared (`docs/`).
+  That's a summary infographic, not the full question bank, so a few
+  specifics (how Y/N/N-A maps to score, how one evidence factor is
+  determined) are this codebase's own documented interpretation — see
+  `services/opboh_scoring.py`'s module docstring.
 - **Epic 4 — Framework Registry**: a generic `Framework`/`FrameworkVersion`
   registry (`models/framework.py`, `services/framework_registry.py`,
   `api/routes/framework.py`) that OPBOH is now registered *into* rather than
