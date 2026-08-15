@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ipacgs.core.audit import record_audit_event
 from ipacgs.models.audit_event import AuditAction
+from ipacgs.models.notification import NotificationKind
 from ipacgs.models.opboh import FindingSeverity, FindingStatus, OpbohFinding
+from ipacgs.services import notifications
 from ipacgs.services.opboh_scoring import CriticalFailure
 
 
@@ -90,6 +92,15 @@ async def assign_owner(
             "status": finding.status.value,
         },
     )
+    await notifications.notify(
+        session,
+        tenant_id=finding.tenant_id,
+        recipient=owner,
+        kind=NotificationKind.ASSIGNMENT,
+        entity_type="opboh_finding",
+        entity_id=finding.id,
+        message=f"You've been assigned finding {finding.id} (due {due_date}).",
+    )
     return finding
 
 
@@ -129,4 +140,18 @@ async def escalate_finding(
         correlation_id=correlation_id,
         after_values={"status": finding.status.value},
     )
+    # No RBAC roles yet, so "notify the configured authority" (WF-ESC-001)
+    # isn't answerable in general — notifying the existing owner (if any)
+    # is what's actually knowable right now. A finding with no owner yet
+    # has nobody to escalate *to* beyond whoever's watching the audit log.
+    if finding.owner is not None:
+        await notifications.notify(
+            session,
+            tenant_id=finding.tenant_id,
+            recipient=finding.owner,
+            kind=NotificationKind.ESCALATION,
+            entity_type="opboh_finding",
+            entity_id=finding.id,
+            message=f"Finding {finding.id} has been escalated.",
+        )
     return finding

@@ -77,3 +77,20 @@ class StageGateDecisionOut(BaseModel):
 
 class RagOut(BaseModel):
     status: RagStatus
+
+
+class ProjectSummaryOut(BaseModel):
+    """Not from_attributes — built by hand in the route from several
+    separately-computed pieces (RAG, blocking gate), same reasoning
+    ScoreOut's manual construction in api/routes/opboh.py already has."""
+
+    id: uuid.UUID
+    name: str
+    organisation_id: uuid.UUID
+    current_stage_code: str | None
+    current_stage_name: str | None
+    status: ProjectStatus
+    rag_status: RagStatus
+    blocking_gate_code: str | None
+    assigned_to: str | None
+    stage_due_date: date | None
