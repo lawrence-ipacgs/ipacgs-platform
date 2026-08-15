@@ -52,11 +52,23 @@ async def _get_decision_or_404(session: AsyncSession, decision_id: uuid.UUID) ->
     # always already in the session's identity map by the time this runs
     # (every caller acted on it earlier in the same request), and get()
     # can return that cached instance without actually applying eager-load
-    # options when no fresh query turns out to be needed — silently
-    # leaving votes/certificate unloaded and unserializable outside an
-    # async context. A real select() always re-applies its options.
+    # options when no fresh query turns out to be needed.
+    #
+    # populate_existing=True on top of that: the *first* call to this
+    # function in a route (before acting on the decision) already loads
+    # `votes`/`certificate` — correctly empty at that point. cast_vote
+    # adds a GateVote via its raw gate_decision_id FK, not through the
+    # `.decision` relationship attribute, so SQLAlchemy's normal
+    # collection-sync-on-relationship-assignment never fires, and the
+    # already-loaded `votes` collection on this identity-mapped instance
+    # stays stale. A second select() with the same options still won't
+    # overwrite an already-populated collection by default — that's what
+    # populate_existing actually forces, not just "run a fresh query".
     result = await session.execute(
-        select(GateDecision).options(*_DECISION_LOAD_OPTIONS).where(GateDecision.id == decision_id)
+        select(GateDecision)
+        .options(*_DECISION_LOAD_OPTIONS)
+        .where(GateDecision.id == decision_id)
+        .execution_options(populate_existing=True)
     )
     decision = result.scalars().first()
     if decision is None:
