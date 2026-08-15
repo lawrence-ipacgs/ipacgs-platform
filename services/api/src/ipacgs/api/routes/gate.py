@@ -48,7 +48,17 @@ async def _get_gate_or_404(session: AsyncSession, gate_id: uuid.UUID) -> Gate:
 
 
 async def _get_decision_or_404(session: AsyncSession, decision_id: uuid.UUID) -> GateDecision:
-    decision = await session.get(GateDecision, decision_id, options=list(_DECISION_LOAD_OPTIONS))
+    # select().options(), not session.get(..., options=...): `decision` is
+    # always already in the session's identity map by the time this runs
+    # (every caller acted on it earlier in the same request), and get()
+    # can return that cached instance without actually applying eager-load
+    # options when no fresh query turns out to be needed — silently
+    # leaving votes/certificate unloaded and unserializable outside an
+    # async context. A real select() always re-applies its options.
+    result = await session.execute(
+        select(GateDecision).options(*_DECISION_LOAD_OPTIONS).where(GateDecision.id == decision_id)
+    )
+    decision = result.scalars().first()
     if decision is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No gate decision {decision_id}.")
     return decision
