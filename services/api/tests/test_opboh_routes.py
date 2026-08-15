@@ -60,10 +60,19 @@ async def organisation(db_session: AsyncSession) -> Organisation:
 @pytest.fixture
 async def catalogue(
     db_session: AsyncSession,
-) -> tuple[OpbohFrameworkVersion, OpbohQuestion, OpbohQuestion]:
+) -> AsyncGenerator[tuple[OpbohFrameworkVersion, OpbohQuestion, OpbohQuestion], None]:
     """One active framework version, one domain, two questions — one
     critical, one not. Just enough to exercise the scoring engine's
-    critical-failure path end to end."""
+    critical-failure path end to end.
+
+    Deactivated on teardown: this commits for real (create_assessment's
+    route handler uses a separate session than this fixture's db_session,
+    so the client can't see the data otherwise), and create_assessment's
+    "pick the active framework version" fallback query has no tiebreaker
+    beyond is_active — a leaked active version from an earlier test in
+    this same file is exactly what broke two tests here (fixed with an
+    ORDER BY in api/routes/opboh.py, but this is the actual leak source
+    that made the missing tiebreaker matter in the first place)."""
     version = OpbohFrameworkVersion(
         id=uuid.uuid4(),
         # version_label is String(20) — a real version label is short
@@ -108,7 +117,11 @@ async def catalogue(
     )
     db_session.add_all([critical_q, ordinary_q])
     await db_session.commit()
-    return version, critical_q, ordinary_q
+    try:
+        yield version, critical_q, ordinary_q
+    finally:
+        version.is_active = False
+        await db_session.commit()
 
 
 async def test_full_lifecycle_clean_accept(

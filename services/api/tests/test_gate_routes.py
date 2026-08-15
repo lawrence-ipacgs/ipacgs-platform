@@ -122,6 +122,13 @@ async def _create_gate(
 
 
 async def _accepted_assessment(db_session: AsyncSession, org: Organisation, project_id: str) -> str:
+    # is_active=True and committed for real (the client's route handlers
+    # use a separate session) — deactivated below once this assessment no
+    # longer needs it, same reason and same fix as two_stages' Stage
+    # rows: create_assessment's own "pick the active framework version"
+    # fallback query has no other row-count assumption to lean on, and a
+    # leaked active version here is exactly what broke two
+    # test_opboh_routes.py tests that don't even touch Gate Engine.
     version = OpbohFrameworkVersion(
         id=uuid.uuid4(),
         version_label=_unique("v")[:20],
@@ -146,6 +153,10 @@ async def _accepted_assessment(db_session: AsyncSession, org: Organisation, proj
     )
     db_session.add(assessment)
     await db_session.commit()
+
+    version.is_active = False
+    await db_session.commit()
+
     return str(assessment.id)
 
 

@@ -102,6 +102,14 @@ async def two_stages(db_session: AsyncSession) -> AsyncGenerator[tuple[Stage, St
 
 
 async def _accepted_assessment(db_session: AsyncSession, org: Organisation) -> OpbohAssessment:
+    # is_active=True and committed for real, same reason two_stages'
+    # Stage rows are — and the same latent leak: this has created and
+    # never deactivated an active OpbohFrameworkVersion since Epic 5.
+    # create_assessment's "pick the active framework version" fallback
+    # had no tiebreaker (fixed separately in api/routes/opboh.py), so a
+    # row like this one sitting around active was exactly what eventually
+    # broke two unrelated test_opboh_routes.py tests once enough of them
+    # accumulated across the suite to tip Postgres's arbitrary row order.
     version = OpbohFrameworkVersion(
         id=uuid.uuid4(),
         version_label=_unique("v")[:20],
@@ -125,6 +133,10 @@ async def _accepted_assessment(db_session: AsyncSession, org: Organisation) -> O
     )
     db_session.add(assessment)
     await db_session.commit()
+
+    version.is_active = False
+    await db_session.commit()
+
     return assessment
 
 
