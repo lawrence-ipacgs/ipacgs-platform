@@ -5,6 +5,14 @@ from ipacgs.models.audit_event import AuditAction, AuditEvent
 from ipacgs.models.base import Base
 from ipacgs.models.evidence import EvidenceDocument, EvidenceStatus
 from ipacgs.models.framework import Framework, FrameworkApplicabilityRule, FrameworkVersion
+from ipacgs.models.gate import (
+    Gate,
+    GateCertificate,
+    GateDecision,
+    GateDecisionStatus,
+    GateVote,
+    GateVoteOutcome,
+)
 from ipacgs.models.opboh import (
     FindingSeverity,
     FindingStatus,
@@ -39,6 +47,12 @@ __all__ = [
     "Framework",
     "FrameworkApplicabilityRule",
     "FrameworkVersion",
+    "Gate",
+    "GateCertificate",
+    "GateDecision",
+    "GateDecisionStatus",
+    "GateVote",
+    "GateVoteOutcome",
     "OpbohAssessment",
     "OpbohAssessmentStatus",
     "OpbohDomain",

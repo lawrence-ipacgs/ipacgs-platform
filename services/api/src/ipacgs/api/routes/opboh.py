@@ -114,8 +114,21 @@ async def create_assessment(
 
     framework_version_id = body.framework_version_id
     if framework_version_id is None:
+        # ORDER BY, deliberately — a bare LIMIT 1 with no tiebreaker is
+        # nondeterministic the moment more than one row has is_active=True
+        # (which nothing currently prevents — unlike the generic Framework
+        # Registry, OpbohFrameworkVersion never got an "activating one
+        # deactivates the others" rule). Picking arbitrarily which
+        # "active" catalogue version an assessment lands on is wrong for
+        # a governance platform regardless of whether tests catch it —
+        # this makes the choice deterministic (most recently effective
+        # wins) rather than leaving it to however Postgres happens to
+        # scan the table today.
         active = await db.execute(
-            select(OpbohFrameworkVersion).where(OpbohFrameworkVersion.is_active.is_(True)).limit(1)
+            select(OpbohFrameworkVersion)
+            .where(OpbohFrameworkVersion.is_active.is_(True))
+            .order_by(OpbohFrameworkVersion.effective_from.desc())
+            .limit(1)
         )
         version = active.scalars().first()
         if version is None:

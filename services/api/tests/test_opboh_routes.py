@@ -60,10 +60,19 @@ async def organisation(db_session: AsyncSession) -> Organisation:
 @pytest.fixture
 async def catalogue(
     db_session: AsyncSession,
-) -> tuple[OpbohFrameworkVersion, OpbohQuestion, OpbohQuestion]:
+) -> AsyncGenerator[tuple[OpbohFrameworkVersion, OpbohQuestion, OpbohQuestion], None]:
     """One active framework version, one domain, two questions — one
     critical, one not. Just enough to exercise the scoring engine's
-    critical-failure path end to end."""
+    critical-failure path end to end.
+
+    Deactivated on teardown: this commits for real (create_assessment's
+    route handler uses a separate session than this fixture's db_session,
+    so the client can't see the data otherwise), and create_assessment's
+    "pick the active framework version" fallback query has no tiebreaker
+    beyond is_active — a leaked active version from an earlier test in
+    this same file is exactly what broke two tests here (fixed with an
+    ORDER BY in api/routes/opboh.py, but this is the actual leak source
+    that made the missing tiebreaker matter in the first place)."""
     version = OpbohFrameworkVersion(
         id=uuid.uuid4(),
         # version_label is String(20) — a real version label is short
@@ -108,7 +117,11 @@ async def catalogue(
     )
     db_session.add_all([critical_q, ordinary_q])
     await db_session.commit()
-    return version, critical_q, ordinary_q
+    try:
+        yield version, critical_q, ordinary_q
+    finally:
+        version.is_active = False
+        await db_session.commit()
 
 
 async def test_full_lifecycle_clean_accept(
@@ -281,15 +294,40 @@ async def _make_project(db_session: AsyncSession, organisation: Organisation) ->
 async def test_creating_an_assessment_links_the_given_project(
     client: AsyncClient, organisation: Organisation, db_session: AsyncSession
 ) -> None:
+    """Passes framework_version_id explicitly rather than relying on
+    create_assessment's "pick the active version" fallback — this test
+    cares about project_id linkage, not which catalogue version gets
+    picked, so it shouldn't need one to be ambiently available. It never
+    created its own before this fix; it just happened to pass by
+    borrowing whatever active version an earlier test in this file left
+    behind — which stopped happening the moment those tests started
+    properly deactivating their own versions on teardown."""
     project = await _make_project(db_session, organisation)
+    version = OpbohFrameworkVersion(
+        id=uuid.uuid4(),
+        version_label=f"t-{uuid.uuid4().hex[:8]}",
+        effective_from=date(2026, 1, 1),
+        is_active=True,
+        created_by="seed",
+        updated_by="seed",
+    )
+    db_session.add(version)
+    await db_session.commit()
 
     _as("alice")
     resp = await client.post(
         "/opboh/assessments",
-        json={"organisation_id": str(organisation.id), "project_id": str(project.id)},
+        json={
+            "organisation_id": str(organisation.id),
+            "project_id": str(project.id),
+            "framework_version_id": str(version.id),
+        },
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["project_id"] == str(project.id)
+
+    version.is_active = False
+    await db_session.commit()
 
 
 async def test_creating_an_assessment_for_a_project_in_a_different_organisation_is_409(

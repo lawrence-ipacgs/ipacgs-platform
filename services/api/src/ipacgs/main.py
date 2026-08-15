@@ -5,7 +5,7 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from ipacgs.api.routes import evidence, framework, health, opboh, project
+from ipacgs.api.routes import evidence, framework, gate, health, opboh, project
 from ipacgs.core.config import get_settings
 from ipacgs.core.security import MakerCheckerViolation
 from ipacgs.services.evidence import IllegalEvidenceTransition
@@ -18,10 +18,10 @@ logging.basicConfig(level=settings.log_level)
 app = FastAPI(
     title="IPAC Governance Systems API",
     description="Milestone 1.1 — Platform Foundation, Epic 3 (OPBOH), Epic 4 (Framework "
-    "Registry) and Epic 5 (Stage Engine), plus Epic 4/5 gap-closing work (applicability "
-    "rules, reopen/RAG/assignment). See the architecture document's Section 4 for what this "
-    "service does and doesn't do yet.",
-    version="0.5.0",
+    "Registry), Epic 5 (Stage Engine) and Epic 6 (Gate Engine), plus Epic 4/5 gap-closing "
+    "work. See the architecture document's Section 4 for what this service does and "
+    "doesn't do yet.",
+    version="0.6.0",
 )
 
 app.include_router(health.router)
@@ -29,6 +29,7 @@ app.include_router(opboh.router)
 app.include_router(evidence.router)
 app.include_router(framework.router)
 app.include_router(project.router)
+app.include_router(gate.router)
 
 
 # Domain exceptions get their own status codes here, once, rather than
