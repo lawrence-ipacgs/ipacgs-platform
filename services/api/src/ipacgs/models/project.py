@@ -11,12 +11,18 @@ recorded — never just a date passing.
 Two design choices worth calling out:
 
 1. `Stage` is configuration (a DB table with an order), not a hardcoded
-   enum — the exact stage names/count in KMI Africa's real SRS aren't
-   confirmed source material yet (same situation OPBOH's illustrative
-   catalogue is in), so baking a specific S1…S4 naming into code would be
-   asserting something not actually verified. `scripts/seed_stages.py`
-   seeds an explicitly illustrative sequence, same honesty as OPBOH's own
-   seed script.
+   enum. As of Epic 5 this was because the exact stage names/count in
+   KMI Africa's real SRS weren't confirmed source material yet (same
+   situation OPBOH's illustrative catalogue was in), so baking a specific
+   naming into code would have asserted something unverified. That's now
+   partially resolved: `scripts/seed_stages.py` seeds UACOC's real,
+   documented Phase 1 (Intake & Screening) sequence — 7 stages, sourced
+   from their "Project Intake Full Process Map" document — but only
+   Phase 1 of the real 5-phase lifecycle that document itself describes;
+   Phases 2-5 still have no shared source material. `Stage` staying
+   configuration rather than an enum is exactly what makes appending
+   those phases, whenever they arrive, a data change rather than a code
+   change.
 2. `StageGateDecision.supporting_assessment_id` points at an
    `OpbohAssessment` specifically, not a generic "Assessment" — OPBOH is
    still the only concrete assessment type that exists after Epic 4's

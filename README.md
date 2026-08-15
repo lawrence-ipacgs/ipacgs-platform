@@ -71,12 +71,22 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   had been pointing at as a placeholder since Epic 3, plus the stage-gate
   mechanism PRN-001 depends on (`models/project.py`,
   `services/stage_engine.py`, `api/routes/project.py`). Stages are
-  configuration (an ordered `Stage` table), not a hardcoded enum — the
-  confirmed real stage list from KMI Africa's SRS hasn't been shared into
-  this repo either, same situation OPBOH's catalogue was in; what's seeded
-  by `scripts/seed_stages.py` is an **illustrative** S1–S4 sequence.
-  Advancing a project's stage requires an accepted OPBOH assessment for
-  the same organisation — never just a date.
+  configuration (an ordered `Stage` table), not a hardcoded enum.
+  `scripts/seed_stages.py` now seeds **real** content: UACOC's Phase 1
+  (Intake & Screening) sequence — 7 stages (Project Submission →
+  Registration → Sponsor and Ownership Verification → Integrity Screening
+  → Minimum-Information Review → Classification and Prioritisation →
+  Project Onboarding), sourced from their "Project Intake Full Process
+  Map" document (`docs/`). That document's own overview describes a real
+  5-phase, 22-step lifecycle; only Phase 1 has been shared in detail so
+  far, so the seeded sequence stops at stage 7 until Phases 2-5 arrive.
+  One honest known mismatch this surfaced: advancing a project's stage
+  still unconditionally requires an accepted OPBOH assessment — the right
+  rule for a compliance checkpoint, but not what UACOC's own document
+  describes gating these particular seven administrative stages. See
+  `services/stage_engine.py`'s module docstring for the detail; not fixed
+  yet, since a real fix needs either per-stage configurable rules or
+  confirmation from KMI/UACOC on what actually gates each step.
 - **Epic 4/5 gap-closing**: the real ticket lists for Epics 4 and 5 turned
   out to be bigger than what those two epics originally shipped — see git
   history for the reconciliation. Closed since: illustrative metadata for

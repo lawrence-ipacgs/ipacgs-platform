@@ -4,6 +4,21 @@
 progression") actually gets enforced — mirrors how FW-OPBOH-015's
 fatal-flaw block lives in `opboh_workflow.decide`, not in the schema: the
 rule is a function precondition, not just a column that happens to exist.
+
+Known mismatch, surfaced when `scripts/seed_stages.py` swapped its
+illustrative sequence for UACOC's real Phase 1 (Intake & Screening)
+stages: `advance_stage` requires an *accepted OPBOH assessment* to leave
+ANY stage, unconditionally. That's the right rule for a compliance
+checkpoint, but UACOC's own process-map document describes these seven
+real stages advancing on administrative approval decisions (e.g.
+"Registration Approval", "Meets Quality Standards?") — not an OPBOH-style
+assessment. The one place OPBOH plausibly does belong is Phase 2's first
+step, "Diagnostic assessment" (the step right after this document ends),
+which is an encouraging sign the two will eventually line up — but as
+written this precondition applies from stage 1, too early. Not fixed
+here: needs either per-stage configurable advancement rules or explicit
+confirmation from KMI/UACOC on what actually gates each of these seven
+steps.
 """
 
 import uuid
