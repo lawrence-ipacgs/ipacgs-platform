@@ -311,8 +311,13 @@ async def test_advance_stage_over_http_succeeds_once_the_gate_has_proceeded(
 
 
 async def test_opening_a_gate_decision_for_an_unknown_gate_is_404(
-    client: AsyncClient, organisation: Organisation
+    client: AsyncClient, organisation: Organisation, two_stages: tuple[Stage, Stage]
 ) -> None:
+    # two_stages is otherwise unused here, but _create_project needs *an*
+    # active stage to exist — without it this test silently depended on
+    # some other test's stage still being active by luck of execution
+    # order, which stopped being true once every other fixture in this
+    # file started properly deactivating its own stages on teardown.
     _as("alice")
     project_id = await _create_project(client, organisation)
 
