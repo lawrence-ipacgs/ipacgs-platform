@@ -13,6 +13,7 @@ from ipacgs.models.gate import (
     GateVote,
     GateVoteOutcome,
 )
+from ipacgs.models.notification import Notification, NotificationKind
 from ipacgs.models.opboh import (
     FindingSeverity,
     FindingStatus,
@@ -53,6 +54,8 @@ __all__ = [
     "GateDecisionStatus",
     "GateVote",
     "GateVoteOutcome",
+    "Notification",
+    "NotificationKind",
     "OpbohAssessment",
     "OpbohAssessmentStatus",
     "OpbohDomain",

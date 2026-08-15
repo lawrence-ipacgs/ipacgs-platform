@@ -109,6 +109,18 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   rules haven't been shared yet. "Signatures" on a certificate means the
   recorded identity of each voter, not a cryptographic signature — no
   PKI in this platform yet for anyone to actually sign with.
+- **Epic 7 — Command Centre & Notifications (basic)**: a personal work
+  queue (`GET /me/notifications`, scoped to the caller's own identity —
+  no RBAC yet to safely offer anyone else's), a project health/stage-gate
+  tracker view (`GET /projects`), and in-app notifications
+  (`models/notification.py`, `services/notifications.py`) wired into
+  stage assignment, finding assignment, and finding escalation. Two
+  honest limits: there's no actual delivery mechanism (email/SMS/push) —
+  a notification exists the moment something creates it, and a recipient
+  finds out by asking (`GET /me/notifications`), not by being told; and
+  there's no scheduler in this platform yet, so overdue-project scanning
+  (`POST /notifications/scan-overdue`, WF-ESC-001…002) has to be
+  triggered externally rather than running on its own.
 - **Release pipeline**: `.github/workflows/release-dev.yml` builds and
   deploys a real image to `dev` on every push to `main`, OIDC-authenticated,
   no stored Azure credentials — see `infra/README.md` § Release pipeline.

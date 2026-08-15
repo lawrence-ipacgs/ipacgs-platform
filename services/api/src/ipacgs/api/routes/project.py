@@ -19,6 +19,7 @@ from ipacgs.api.schemas.project import (
     AssignStageRequest,
     CreateProjectRequest,
     ProjectOut,
+    ProjectSummaryOut,
     RagOut,
     ReopenStageRequest,
     StageGateDecisionOut,
@@ -27,10 +28,11 @@ from ipacgs.api.schemas.project import (
 from ipacgs.core.db import get_db
 from ipacgs.core.security import CurrentUser, get_current_user
 from ipacgs.models.framework import Framework
+from ipacgs.models.notification import NotificationKind
 from ipacgs.models.opboh import OpbohAssessment, OpbohFinding
 from ipacgs.models.organisation import Organisation
 from ipacgs.models.project import Project, Stage, StageGateDecision
-from ipacgs.services import framework_applicability, stage_engine
+from ipacgs.services import framework_applicability, gate_engine, notifications, stage_engine
 
 router = APIRouter(tags=["projects"])
 
@@ -149,6 +151,23 @@ async def assign_stage_route(
     project = await stage_engine.assign_stage(
         db, project, assigned_to=body.assigned_to, due_date=body.due_date, actor=user.object_id
     )
+    # Wired here, not inside stage_engine.assign_stage itself: services/
+    # notifications.py already imports RagStatus/compute_project_rag from
+    # services/stage_engine.py for scan_overdue_projects, so the reverse
+    # import would be circular. Same reasoning, same fix as the gate/
+    # stage non-bypassable check — a plain call at the route layer costs
+    # nothing a service-layer call wouldn't, without restructuring two
+    # modules around avoiding it.
+    await notifications.notify(
+        db,
+        tenant_id=project.tenant_id,
+        recipient=body.assigned_to,
+        kind=NotificationKind.ASSIGNMENT,
+        entity_type="project",
+        entity_id=project.id,
+        message=f"You've been assigned project {project.name!r}"
+        + (f" (due {body.due_date})." if body.due_date else "."),
+    )
     await db.commit()
     await db.refresh(project)
     return project
@@ -188,3 +207,43 @@ async def applicable_frameworks(
 ) -> list[Framework]:
     project = await _get_project_or_404(db, project_id)
     return await framework_applicability.applicable_frameworks_for_project(db, project)
+
+
+@router.get("/projects", response_model=list[ProjectSummaryOut])
+async def list_projects(db: AsyncSession = Depends(get_db)) -> list[ProjectSummaryOut]:
+    """FR-RPT-002 (subset) — the project health / stage-gate tracker
+    view: every project, its current stage, RAG status, and whether a
+    gate is blocking it, in one call rather than one round-trip per
+    project. Unscoped across tenants, same as every other list route in
+    this repo (GET /frameworks, GET /gates, GET /stages) — real
+    tenant-scoping is the same pre-existing, already-flagged gap
+    TenantScopedMixin's own docstring names, not something new here.
+
+    One request per project to compute RAG/blocking-gate — fine at the
+    scale this platform runs at today, worth revisiting with a batched
+    query if the project count ever makes that not true."""
+    projects_result = await db.execute(select(Project).order_by(Project.created_at.desc()))
+    projects = projects_result.scalars().all()
+
+    summaries: list[ProjectSummaryOut] = []
+    for project in projects:
+        stage = await db.get(Stage, project.current_stage_id)
+        rag = await stage_engine.compute_project_rag(db, project)
+        blocking_gate = await gate_engine.gate_blocking_advancement(
+            db, project, project.current_stage_id
+        )
+        summaries.append(
+            ProjectSummaryOut(
+                id=project.id,
+                name=project.name,
+                organisation_id=project.organisation_id,
+                current_stage_code=stage.code if stage else None,
+                current_stage_name=stage.name if stage else None,
+                status=project.status,
+                rag_status=rag,
+                blocking_gate_code=blocking_gate.code if blocking_gate else None,
+                assigned_to=project.assigned_to,
+                stage_due_date=project.stage_due_date,
+            )
+        )
+    return summaries
