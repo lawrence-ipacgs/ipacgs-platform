@@ -18,6 +18,8 @@ from ipacgs.models.opboh import (
     OpbohFinding,
     OpbohFrameworkVersion,
     OpbohQuestion,
+    OpbohResponse,
+    OpbohResponseValue,
 )
 from ipacgs.models.organisation import Organisation
 from ipacgs.models.project import Project, Stage
@@ -363,7 +365,23 @@ async def test_rag_is_grey_with_no_linked_assessment(db_session: AsyncSession) -
     assert await compute_project_rag(db_session, project) == RagStatus.GREY
 
 
-async def test_rag_is_green_for_a_clean_accepted_assessment(db_session: AsyncSession) -> None:
+async def test_rag_is_red_for_a_vacuously_clean_but_empty_assessment(
+    db_session: AsyncSession,
+) -> None:
+    """No domains at all — vacuously clean in opboh_scoring terms (nothing
+    configured means nothing could fail, so
+    AssessmentResult.is_clean is True — see
+    test_opboh_scoring.py::test_empty_assessment_scores_zero_but_is_vacuously_clean).
+    But under the real Assurance Score formula, zero domains scored also
+    means assurance_score is 0.0/100, and RagStatus now mirrors
+    AssessmentResult.rag exactly (compute_project_rag's docstring) rather
+    than re-deriving its own is_clean-based rule the way it used to. Zero
+    domains scored is zero assurance established, not a clean bill of
+    health, so Red is the right answer here, not Green — this replaces a
+    stale Green expectation left over from before real scoring landed
+    (29b9e65), which changed this exact rule without this exact test
+    having been run first (no Postgres in that commit's own local check,
+    per its own message — see git history)."""
     org = await _make_tenant_and_org(db_session)
     await _make_stages(db_session, 1)
     project = await create_project(
@@ -374,9 +392,62 @@ async def test_rag_is_green_for_a_clean_accepted_assessment(db_session: AsyncSes
         description=None,
         actor="alice",
     )
-    # No domains at all — vacuously clean, same as
-    # test_opboh_scoring.py::test_empty_assessment_scores_zero_but_is_vacuously_clean.
     await _make_assessment(db_session, org, status=OpbohAssessmentStatus.ACCEPTED, project=project)
+
+    assert await compute_project_rag(db_session, project) == RagStatus.RED
+
+
+async def test_rag_is_green_for_an_assessment_with_a_real_answered_domain(
+    db_session: AsyncSession,
+) -> None:
+    """The real Green case the old test above never actually exercised —
+    an answered domain, above its own threshold, no critical failures."""
+    org = await _make_tenant_and_org(db_session)
+    await _make_stages(db_session, 1)
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+    assessment = await _make_assessment(
+        db_session, org, status=OpbohAssessmentStatus.ACCEPTED, project=project
+    )
+    domain = OpbohDomain(
+        id=uuid.uuid4(),
+        framework_version_id=assessment.framework_version_id,
+        code="sponsor",
+        name="Sponsor Readiness",
+        weight=1.0,
+        min_score_threshold=3.0,
+    )
+    db_session.add(domain)
+    await db_session.flush()
+    question = OpbohQuestion(
+        id=uuid.uuid4(),
+        domain_id=domain.id,
+        control_objective="Sponsor has clear legal existence",
+        question_text="Is the sponsor a validly registered legal entity?",
+        is_critical_control=False,
+        pass_threshold=3.0,
+    )
+    db_session.add(question)
+    await db_session.flush()
+    db_session.add(
+        OpbohResponse(
+            id=uuid.uuid4(),
+            assessment_id=assessment.id,
+            question_id=question.id,
+            response_value=OpbohResponseValue.YES,
+            score=5,
+            evidence_sufficiency_factor=1.0,
+            created_by="alice",
+            updated_by="alice",
+        )
+    )
+    await db_session.flush()
 
     assert await compute_project_rag(db_session, project) == RagStatus.GREEN
 
