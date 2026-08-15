@@ -68,6 +68,9 @@ async def _get_assessment_or_404(
 def _score_to_schema(result: AssessmentResult) -> ScoreOut:
     return ScoreOut(
         overall_score=result.overall_score,
+        evidence_sufficiency_factor=result.evidence_sufficiency_factor,
+        assurance_score=result.assurance_score,
+        rag=result.rag.value,
         is_clean=result.is_clean,
         has_critical_failure=result.has_critical_failure,
         domain_results=[
@@ -205,8 +208,9 @@ async def upsert_response(
         )
         db.add(response)
 
+    response.response_value = body.response_value
     response.score = body.score
-    response.evidence_sufficient = body.evidence_sufficient
+    response.evidence_sufficiency_factor = body.evidence_sufficiency_factor
     response.notes = body.notes
     response.answered_by = user.object_id
     response.answered_at = now
@@ -300,7 +304,7 @@ async def decide_route(
         decision=OpbohAssessmentStatus(body.decision),
         actor=user.object_id,
         has_critical_failure=result.has_critical_failure,
-        overall_score=result.overall_score,
+        assurance_score=result.assurance_score,
         decision_summary=body.decision_summary,
         correlation_id=uuid.uuid4(),
     )

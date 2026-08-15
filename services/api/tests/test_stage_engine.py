@@ -401,7 +401,7 @@ async def test_rag_is_red_when_a_critical_control_has_failed(db_session: AsyncSe
         code="sponsor",
         name="Sponsor Readiness",
         weight=1.0,
-        min_score_threshold=0.6,
+        min_score_threshold=3.0,
     )
     db_session.add(domain)
     await db_session.flush()
@@ -412,7 +412,7 @@ async def test_rag_is_red_when_a_critical_control_has_failed(db_session: AsyncSe
             control_objective="Sponsor has clear legal existence",
             question_text="Is the sponsor a validly registered legal entity?",
             is_critical_control=True,
-            pass_threshold=1.0,
+            pass_threshold=5.0,
         )
     )
     await db_session.flush()

@@ -114,7 +114,7 @@ async def test_decide_rejects_accept_with_an_unresolved_critical_failure() -> No
             decision=OpbohAssessmentStatus.ACCEPTED,
             actor="dave",
             has_critical_failure=True,
-            overall_score=0.95,  # a high score does not rescue this
+            assurance_score=95.0,  # a high score does not rescue this
             decision_summary=None,
             correlation_id=uuid.uuid4(),
         )
@@ -134,7 +134,7 @@ async def test_decide_allows_conditional_accept_with_a_critical_failure() -> Non
             decision=OpbohAssessmentStatus.CONDITIONALLY_ACCEPTED,
             actor="dave",
             has_critical_failure=True,
-            overall_score=0.95,
+            assurance_score=95.0,
             decision_summary="Pending remediation of X.",
             correlation_id=uuid.uuid4(),
         )
@@ -154,7 +154,7 @@ async def test_decide_rejects_the_reviewer_as_approver() -> None:
             decision=OpbohAssessmentStatus.REJECTED,
             actor="carol",
             has_critical_failure=False,
-            overall_score=0.4,
+            assurance_score=40.0,
             decision_summary=None,
             correlation_id=uuid.uuid4(),
         )

@@ -17,6 +17,17 @@ Scoring and state-transition *logic* — not just the schema — lives in
 `services/opboh.py`, not here; this module only defines what a state or a
 score means to store, not how one is computed or when a transition is
 legal.
+
+The catalogue content (domains/questions) is still illustrative — see
+`scripts/seed_opboh_catalogue.py`. What changed since Epic 3: the response
+shape (`OpbohResponseValue`, the 0-5 `score` scale, and
+`evidence_sufficiency_factor`) and the persisted `assurance_score` on
+`OpbohAssessment` are now real, sourced from an OPBOH Full-Cycle Assessment
+Module v1.1 overview KMI shared (`docs/IMG-20260814-WA0011.jpg`) — a
+summary infographic, not the underlying question bank, so the exact
+Y/N/N-A-to-score relationship and how a reviewer arrives at a specific
+evidence factor are this codebase's own documented interpretation, not
+confirmed spec. See `services/opboh_scoring.py`.
 """
 
 import uuid
@@ -92,9 +103,11 @@ class OpbohDomain(Base):
     # thresholds"). weight shapes the composite score; min_score_threshold
     # is this domain's own RAG floor, independent of the composite —
     # exactly the "no averaging concealment" principle applied at the
-    # domain level, not just the question level.
+    # domain level, not just the question level. Default rescaled from 0.6
+    # to 3.0 ("Moderate" or better) to match the real 0-5 response scale —
+    # see OpbohResponse.score's docstring.
     weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
-    min_score_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.6)
+    min_score_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=3.0)
 
     questions: Mapped[list["OpbohQuestion"]] = relationship(
         back_populates="domain", order_by="OpbohQuestion.sequence"
@@ -125,8 +138,9 @@ class OpbohQuestion(Base):
     pass_threshold: Mapped[float] = mapped_column(
         Float,
         nullable=False,
-        default=1.0,
-        doc="Minimum response score counted as a pass for this question.",
+        default=5.0,
+        doc="Minimum response score (0-5 scale) counted as a pass for this question. "
+        "Default rescaled from 1.0 to 5.0 — see OpbohResponse.score's docstring.",
     )
 
     evidence_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -194,9 +208,28 @@ class OpbohAssessment(Base, TenantScopedMixin, AuditedMixin):
     reviewed_by: Mapped[str | None] = mapped_column(String(36))
     approved_by: Mapped[str | None] = mapped_column(String(36))
 
-    overall_score: Mapped[float | None] = mapped_column(Float)
+    # Renamed from overall_score — real, from docs/IMG-20260814-WA0011.jpg:
+    # this is the Assurance Score specifically (0-100 = weighted score
+    # achieved x evidence sufficiency factor), not the raw 0-5 weighted
+    # domain average, which `services/opboh_scoring.py`'s AssessmentResult
+    # still calls overall_score. See that module for both formulas.
+    assurance_score: Mapped[float | None] = mapped_column(Float, doc="0-100. See opboh_scoring.py.")
     has_critical_failure: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     decision_summary: Mapped[str | None] = mapped_column(Text)
+
+
+class OpbohResponseValue(StrEnum):
+    """Real — from the OPBOH Full-Cycle Assessment Module v1.1 overview
+    (`docs/IMG-20260814-WA0011.jpg`): every question's primary answer is
+    Yes / No / Not Applicable, distinct from the 0-5 `score`. NOT_APPLICABLE
+    questions are excluded from domain scoring entirely rather than scored
+    zero — `services/opboh_scoring.py` documents that interpretation, since
+    the source material doesn't spell out the exact Y/N/N-A-to-score
+    relationship."""
+
+    YES = "yes"
+    NO = "no"
+    NOT_APPLICABLE = "not_applicable"
 
 
 class OpbohResponse(Base, AuditedMixin):
@@ -210,8 +243,24 @@ class OpbohResponse(Base, AuditedMixin):
         UUID(as_uuid=True), ForeignKey("opboh_questions.id"), nullable=False
     )
 
-    score: Mapped[float | None] = mapped_column(Float, doc="0.0-1.0. Null until answered.")
-    evidence_sufficient: Mapped[bool | None] = mapped_column(Boolean)
+    response_value: Mapped[OpbohResponseValue | None] = mapped_column(
+        Enum(OpbohResponseValue, name="opboh_response_value", values_callable=_VALUES_CALLABLE),
+        doc="Yes/No/Not Applicable. Null until answered.",
+    )
+    score: Mapped[int | None] = mapped_column(
+        Integer,
+        doc="0-5 Likert scale (real — 0 None/Not Met, 1 Minimal, 2 Limited, 3 Moderate, "
+        "4 Substantial, 5 Fully Met, per docs/IMG-20260814-WA0011.jpg). Null until answered, "
+        "and meaningless when response_value is NOT_APPLICABLE.",
+    )
+    # Real — the source infographic's "Evidence Sufficiency Factor (0.5-1.0)",
+    # a continuous multiplier in the real Assurance Score formula. Replaces
+    # the old plain evidence_sufficient boolean (Epic 3); how a reviewer
+    # actually arrives at a specific number in that range isn't specified
+    # anywhere shared so far, so this is a plain input field, not computed.
+    evidence_sufficiency_factor: Mapped[float | None] = mapped_column(
+        Float, doc="0.5-1.0. Null until evidence has been reviewed for this response."
+    )
     notes: Mapped[str | None] = mapped_column(Text)
     answered_by: Mapped[str | None] = mapped_column(String(36))
     answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
