@@ -294,15 +294,40 @@ async def _make_project(db_session: AsyncSession, organisation: Organisation) ->
 async def test_creating_an_assessment_links_the_given_project(
     client: AsyncClient, organisation: Organisation, db_session: AsyncSession
 ) -> None:
+    """Passes framework_version_id explicitly rather than relying on
+    create_assessment's "pick the active version" fallback — this test
+    cares about project_id linkage, not which catalogue version gets
+    picked, so it shouldn't need one to be ambiently available. It never
+    created its own before this fix; it just happened to pass by
+    borrowing whatever active version an earlier test in this file left
+    behind — which stopped happening the moment those tests started
+    properly deactivating their own versions on teardown."""
     project = await _make_project(db_session, organisation)
+    version = OpbohFrameworkVersion(
+        id=uuid.uuid4(),
+        version_label=f"t-{uuid.uuid4().hex[:8]}",
+        effective_from=date(2026, 1, 1),
+        is_active=True,
+        created_by="seed",
+        updated_by="seed",
+    )
+    db_session.add(version)
+    await db_session.commit()
 
     _as("alice")
     resp = await client.post(
         "/opboh/assessments",
-        json={"organisation_id": str(organisation.id), "project_id": str(project.id)},
+        json={
+            "organisation_id": str(organisation.id),
+            "project_id": str(project.id),
+            "framework_version_id": str(version.id),
+        },
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["project_id"] == str(project.id)
+
+    version.is_active = False
+    await db_session.commit()
 
 
 async def test_creating_an_assessment_for_a_project_in_a_different_organisation_is_409(
