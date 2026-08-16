@@ -17,11 +17,16 @@ from ipacgs.api.schemas.opboh import FindingOut
 from ipacgs.api.schemas.project import (
     AdvanceStageRequest,
     AssignStageRequest,
+    ChecklistItemOut,
+    ChecklistResponseOut,
     CreateProjectRequest,
     ProjectOut,
     ProjectSummaryOut,
     RagOut,
     ReopenStageRequest,
+    RespondChecklistRequest,
+    StageDecisionOut,
+    StageDecisionRequest,
     StageGateDecisionOut,
     StageOut,
 )
@@ -32,6 +37,7 @@ from ipacgs.models.notification import NotificationKind
 from ipacgs.models.opboh import OpbohAssessment, OpbohFinding
 from ipacgs.models.organisation import Organisation
 from ipacgs.models.project import Project, Stage, StageGateDecision
+from ipacgs.models.stage_checklist import StageChecklistItem, StageChecklistResponse, StageDecision
 from ipacgs.services import framework_applicability, gate_engine, notifications, stage_engine
 
 router = APIRouter(tags=["projects"])
@@ -93,11 +99,16 @@ async def advance_stage_route(
 ) -> StageGateDecision:
     project = await _get_project_or_404(db, project_id)
 
-    assessment = await db.get(OpbohAssessment, body.supporting_assessment_id)
-    if assessment is None:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND, f"No OPBOH assessment {body.supporting_assessment_id}."
-        )
+    # Only looked up when given — a stage with its own checklist configured
+    # (services/stage_engine.py's Stage Checklist Engine) advances on a
+    # recorded StageDecision instead and needs no OPBOH assessment at all.
+    assessment = None
+    if body.supporting_assessment_id is not None:
+        assessment = await db.get(OpbohAssessment, body.supporting_assessment_id)
+        if assessment is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, f"No OPBOH assessment {body.supporting_assessment_id}."
+            )
 
     try:
         decision = await stage_engine.advance_stage(
@@ -106,6 +117,100 @@ async def advance_stage_route(
             supporting_assessment=assessment,
             actor=user.object_id,
             notes=body.notes,
+        )
+    except stage_engine.IllegalStageAdvancement as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+
+    await db.commit()
+    await db.refresh(decision)
+    return decision
+
+
+@router.get("/projects/{project_id}/stage-checklist", response_model=list[ChecklistItemOut])
+async def stage_checklist(
+    project_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+) -> list[ChecklistItemOut]:
+    """The project's current stage's checklist items, each paired with this
+    project's response so far (if any) — the read model Section 33's
+    "Admission & Onboarding Screen" maps onto."""
+    project = await _get_project_or_404(db, project_id)
+
+    items_result = await db.execute(
+        select(StageChecklistItem)
+        .where(
+            StageChecklistItem.stage_id == project.current_stage_id,
+            StageChecklistItem.is_active.is_(True),
+        )
+        .order_by(StageChecklistItem.sequence)
+    )
+    items = items_result.scalars().all()
+
+    responses_result = await db.execute(
+        select(StageChecklistResponse).where(StageChecklistResponse.project_id == project_id)
+    )
+    responses_by_item = {r.item_id: r for r in responses_result.scalars().all()}
+
+    out: list[ChecklistItemOut] = []
+    for item in items:
+        response = responses_by_item.get(item.id)
+        out.append(
+            ChecklistItemOut(
+                item_id=item.id,
+                sequence=item.sequence,
+                criterion=item.criterion,
+                response_value=response.response_value if response else None,
+                comment=response.comment if response else None,
+                answered_by=response.answered_by if response else None,
+                answered_at=response.answered_at if response else None,
+            )
+        )
+    return out
+
+
+@router.post(
+    "/projects/{project_id}/stage-checklist/{item_id}/respond", response_model=ChecklistResponseOut
+)
+async def respond_to_checklist_item(
+    project_id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: RespondChecklistRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> StageChecklistResponse:
+    project = await _get_project_or_404(db, project_id)
+    item = await db.get(StageChecklistItem, item_id)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No checklist item {item_id}.")
+
+    try:
+        response = await stage_engine.record_checklist_response(
+            db,
+            project,
+            item,
+            response_value=body.response_value,
+            comment=body.comment,
+            actor=user.object_id,
+        )
+    except stage_engine.IllegalStageAdvancement as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+
+    await db.commit()
+    await db.refresh(response)
+    return response
+
+
+@router.post("/projects/{project_id}/stage-decision", response_model=StageDecisionOut)
+async def stage_decision_route(
+    project_id: uuid.UUID,
+    body: StageDecisionRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> StageDecision:
+    project = await _get_project_or_404(db, project_id)
+
+    try:
+        decision = await stage_engine.record_stage_decision(
+            db, project, outcome=body.outcome, conditions=body.conditions, actor=user.object_id
         )
     except stage_engine.IllegalStageAdvancement as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc

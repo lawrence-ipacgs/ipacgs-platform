@@ -23,6 +23,7 @@ from ipacgs.models.framework import Framework
 from ipacgs.models.opboh import OpbohAssessment, OpbohAssessmentStatus, OpbohFrameworkVersion
 from ipacgs.models.organisation import Organisation
 from ipacgs.models.project import Stage
+from ipacgs.models.stage_checklist import StageChecklistItem
 from ipacgs.models.tenant import Tenant
 
 
@@ -264,6 +265,119 @@ async def test_advance_stage_for_an_unknown_project_is_404(client: AsyncClient) 
     resp = await client.post(
         f"/projects/{uuid.uuid4()}/advance-stage",
         json={"supporting_assessment_id": str(uuid.uuid4())},
+    )
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Stage Checklist Engine — real per-stage entry/exit criteria
+# ---------------------------------------------------------------------------
+
+
+async def _checklist_items_for(
+    db_session: AsyncSession, stage: Stage, criteria: list[str]
+) -> list[StageChecklistItem]:
+    # Committed for real, same reason two_stages' rows are — the route
+    # handlers below use a separate session than this fixture's
+    # db_session. No deactivate-on-teardown needed unlike two_stages:
+    # these are scoped by stage_id, not a global unscoped ordering query,
+    # so a leaked row here can't silently win a different test's lookup.
+    items = [
+        StageChecklistItem(
+            id=uuid.uuid4(),
+            stage_id=stage.id,
+            sequence=(i + 1) * 10,
+            criterion=criterion,
+            is_active=True,
+            created_by="seed",
+            updated_by="seed",
+        )
+        for i, criterion in enumerate(criteria)
+    ]
+    db_session.add_all(items)
+    await db_session.commit()
+    return items
+
+
+async def test_stage_checklist_lifecycle_over_http(
+    client: AsyncClient,
+    organisation: Organisation,
+    two_stages: tuple[Stage, Stage],
+    db_session: AsyncSession,
+) -> None:
+    """End to end over HTTP: no OPBOH assessment anywhere in this test —
+    the checklist + decision alone gate the advance."""
+    stage_a, stage_b = two_stages
+    items = await _checklist_items_for(db_session, stage_a, ["Criterion A", "Criterion B"])
+
+    _as("alice")
+    create_resp = await client.post(
+        "/projects", json={"organisation_id": str(organisation.id), "name": "Test Project"}
+    )
+    project_id = create_resp.json()["id"]
+
+    checklist_resp = await client.get(f"/projects/{project_id}/stage-checklist")
+    assert checklist_resp.status_code == 200
+    body = checklist_resp.json()
+    assert len(body) == 2
+    assert body[0]["criterion"] == "Criterion A"
+    assert body[0]["response_value"] is None
+
+    for item in items:
+        respond_resp = await client.post(
+            f"/projects/{project_id}/stage-checklist/{item.id}/respond",
+            json={"response_value": "yes", "comment": "Confirmed."},
+        )
+        assert respond_resp.status_code == 200, respond_resp.text
+
+    # Blocked before a decision is recorded — same rule as the service layer.
+    early_advance = await client.post(f"/projects/{project_id}/advance-stage", json={})
+    assert early_advance.status_code == 409
+
+    decision_resp = await client.post(
+        f"/projects/{project_id}/stage-decision",
+        json={"outcome": "proceed_with_conditions", "conditions": "Confirm next stage."},
+    )
+    assert decision_resp.status_code == 200, decision_resp.text
+    assert decision_resp.json()["outcome"] == "proceed_with_conditions"
+
+    advance_resp = await client.post(f"/projects/{project_id}/advance-stage", json={})
+    assert advance_resp.status_code == 200, advance_resp.text
+    assert advance_resp.json()["to_stage_id"] == str(stage_b.id)
+    assert advance_resp.json()["supporting_assessment_id"] is None
+
+
+async def test_stage_decision_rejects_unanswered_checklist_items_over_http(
+    client: AsyncClient,
+    organisation: Organisation,
+    two_stages: tuple[Stage, Stage],
+    db_session: AsyncSession,
+) -> None:
+    stage_a, _stage_b = two_stages
+    await _checklist_items_for(db_session, stage_a, ["Criterion A"])
+
+    _as("alice")
+    create_resp = await client.post(
+        "/projects", json={"organisation_id": str(organisation.id), "name": "Test Project"}
+    )
+    project_id = create_resp.json()["id"]
+
+    resp = await client.post(f"/projects/{project_id}/stage-decision", json={"outcome": "proceed"})
+    assert resp.status_code == 409
+
+
+async def test_respond_to_an_unknown_checklist_item_is_404(
+    client: AsyncClient, organisation: Organisation, two_stages: tuple[Stage, Stage]
+) -> None:
+    _as("alice")
+    create_resp = await client.post(
+        "/projects", json={"organisation_id": str(organisation.id), "name": "Test Project"}
+    )
+    project_id = create_resp.json()["id"]
+
+    resp = await client.post(
+        f"/projects/{project_id}/stage-checklist/{uuid.uuid4()}/respond",
+        json={"response_value": "yes"},
     )
     assert resp.status_code == 404
 

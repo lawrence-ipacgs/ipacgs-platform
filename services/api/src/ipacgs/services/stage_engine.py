@@ -5,20 +5,24 @@ progression") actually gets enforced — mirrors how FW-OPBOH-015's
 fatal-flaw block lives in `opboh_workflow.decide`, not in the schema: the
 rule is a function precondition, not just a column that happens to exist.
 
-Known mismatch, surfaced when `scripts/seed_stages.py` swapped its
-illustrative sequence for UACOC's real Phase 1 (Intake & Screening)
-stages: `advance_stage` requires an *accepted OPBOH assessment* to leave
-ANY stage, unconditionally. That's the right rule for a compliance
-checkpoint, but UACOC's own process-map document describes these seven
-real stages advancing on administrative approval decisions (e.g.
-"Registration Approval", "Meets Quality Standards?") — not an OPBOH-style
-assessment. The one place OPBOH plausibly does belong is Phase 2's first
-step, "Diagnostic assessment" (the step right after this document ends),
-which is an encouraging sign the two will eventually line up — but as
-written this precondition applies from stage 1, too early. Not fixed
-here: needs either per-stage configurable advancement rules or explicit
-confirmation from KMI/UACOC on what actually gates each of these seven
-steps.
+Formerly a known mismatch, now fixed: `advance_stage` used to require an
+*accepted OPBOH assessment* to leave ANY stage, unconditionally — the
+right rule for a compliance checkpoint, but wrong for UACOC's seven real
+`INTK-*` stages, whose own process-map document describes them advancing
+on administrative approval against stage-specific criteria, not an
+OPBOH-style assessment. `models/stage_checklist.py` (Stage Checklist
+Engine) is that fix: `advance_stage` now checks whether the project's
+current stage has an active checklist configured
+(`scripts/seed_stage_checklists.py` seeds one, sourced from each stage's
+own Exit Criteria panel in the Process Map) and, if so, requires a
+recorded PROCEED/PROCEED_WITH_CONDITIONS `StageDecision` for it instead of
+an OPBOH assessment. A stage with no checklist configured falls back to
+the original OPBOH-assessment path unchanged — which is exactly where a
+future OPBOH-gated stage (the process-map document's own Phase 2,
+"Diagnostic assessment," the step right after Onboarding, is the one
+place OPBOH plausibly belongs) will keep working with zero code change.
+See `models/stage_checklist.py`'s module docstring for the full mechanism
+and its sourcing.
 """
 
 import uuid
@@ -37,6 +41,13 @@ from ipacgs.models.project import (
     StageGateDecision,
     StageGateDecisionKind,
 )
+from ipacgs.models.stage_checklist import (
+    ChecklistResponseValue,
+    StageChecklistItem,
+    StageChecklistResponse,
+    StageDecision,
+    StageDecisionOutcome,
+)
 from ipacgs.services.opboh_query import compute_assessment_score
 
 # Deliberately importing Gate/GateDecision models here, not
@@ -51,6 +62,14 @@ _ACCEPTED_STATES = frozenset(
     {OpbohAssessmentStatus.ACCEPTED, OpbohAssessmentStatus.CONDITIONALLY_ACCEPTED}
 )
 _OPEN_FINDING_STATES = frozenset({FindingStatus.OPEN, FindingStatus.IN_PROGRESS})
+
+# Only these two of StageDecisionOutcome's seven values actually let a
+# project leave its current stage — the other five are real, named ways to
+# *not* proceed (Return for Information, Require Due Diligence, Escalate,
+# Hold/Pending, Decline), not just an implicit "anything else blocks."
+_ADVANCING_OUTCOMES = frozenset(
+    {StageDecisionOutcome.PROCEED, StageDecisionOutcome.PROCEED_WITH_CONDITIONS}
+)
 
 
 class StageEngineError(Exception):
@@ -106,27 +125,60 @@ async def advance_stage(
     session: AsyncSession,
     project: Project,
     *,
-    supporting_assessment: OpbohAssessment,
+    supporting_assessment: OpbohAssessment | None = None,
     actor: str,
     notes: str | None = None,
 ) -> StageGateDecision:
-    if supporting_assessment.status not in _ACCEPTED_STATES:
-        raise IllegalStageAdvancement(
-            f"Assessment {supporting_assessment.id} is "
-            f"{supporting_assessment.status.value} — advancing a stage needs an "
-            "accepted (or conditionally accepted) assessment, not a date."
-        )
-    if supporting_assessment.organisation_id != project.organisation_id:
-        raise IllegalStageAdvancement(
-            f"Assessment {supporting_assessment.id} is for a different organisation "
-            f"than project {project.id} — it can't justify this project's advancement."
-        )
-
     current_stage = await session.get(Stage, project.current_stage_id)
     if current_stage is None:
         raise IllegalStageAdvancement(
             f"Project {project.id}'s current stage {project.current_stage_id} no longer exists."
         )
+
+    checklist_configured = (
+        await session.execute(
+            select(StageChecklistItem.id)
+            .where(
+                StageChecklistItem.stage_id == current_stage.id,
+                StageChecklistItem.is_active.is_(True),
+            )
+            .limit(1)
+        )
+    ).first() is not None
+
+    if checklist_configured:
+        latest_decision_result = await session.execute(
+            select(StageDecision)
+            .where(
+                StageDecision.project_id == project.id, StageDecision.stage_id == current_stage.id
+            )
+            .order_by(StageDecision.decided_at.desc())
+            .limit(1)
+        )
+        latest_decision = latest_decision_result.scalars().first()
+        if latest_decision is None or latest_decision.outcome not in _ADVANCING_OUTCOMES:
+            raise IllegalStageAdvancement(
+                f"Stage {current_stage.code} has its own checklist configured — it needs a "
+                "recorded PROCEED or PROCEED_WITH_CONDITIONS StageDecision to advance, not an "
+                "OPBOH assessment (see record_stage_decision)."
+            )
+    else:
+        if supporting_assessment is None:
+            raise IllegalStageAdvancement(
+                f"Stage {current_stage.code} has no checklist configured — advancing it needs a "
+                "supporting OPBOH assessment."
+            )
+        if supporting_assessment.status not in _ACCEPTED_STATES:
+            raise IllegalStageAdvancement(
+                f"Assessment {supporting_assessment.id} is "
+                f"{supporting_assessment.status.value} — advancing a stage needs an "
+                "accepted (or conditionally accepted) assessment, not a date."
+            )
+        if supporting_assessment.organisation_id != project.organisation_id:
+            raise IllegalStageAdvancement(
+                f"Assessment {supporting_assessment.id} is for a different organisation "
+                f"than project {project.id} — it can't justify this project's advancement."
+            )
 
     # GATE-0[0-1]-006 — non-bypassable effect. If a gate is configured to
     # trigger at the project's current stage, it must have a PROCEED
@@ -176,7 +228,9 @@ async def advance_stage(
         kind=StageGateDecisionKind.ADVANCE,
         from_stage_id=current_stage.id,
         to_stage_id=next_stage.id,
-        supporting_assessment_id=supporting_assessment.id,
+        supporting_assessment_id=(
+            supporting_assessment.id if supporting_assessment is not None else None
+        ),
         decided_by=actor,
         decided_at=datetime.now(UTC),
         notes=notes,
@@ -190,6 +244,114 @@ async def advance_stage(
     project.assigned_to = None
     project.stage_due_date = None
 
+    await session.flush()
+    return decision
+
+
+async def record_checklist_response(
+    session: AsyncSession,
+    project: Project,
+    item: StageChecklistItem,
+    *,
+    response_value: ChecklistResponseValue,
+    comment: str | None,
+    actor: str,
+) -> StageChecklistResponse:
+    """Upsert semantics on (project_id, item_id) — same pattern
+    `api/routes/opboh.py`'s `upsert_response` already uses for
+    `OpbohResponse`. Rejects an item that belongs to a stage other than the
+    project's *current* one — answering ahead of or behind where the
+    project actually is would make `advance_stage`'s "every active item at
+    the current stage answered" check meaningless."""
+    if item.stage_id != project.current_stage_id:
+        raise IllegalStageAdvancement(
+            f"Checklist item {item.id} belongs to a different stage than project "
+            f"{project.id}'s current stage."
+        )
+
+    existing_result = await session.execute(
+        select(StageChecklistResponse).where(
+            StageChecklistResponse.project_id == project.id,
+            StageChecklistResponse.item_id == item.id,
+        )
+    )
+    response = existing_result.scalars().first()
+    now = datetime.now(UTC)
+    if response is None:
+        response = StageChecklistResponse(
+            id=uuid.uuid4(),
+            tenant_id=project.tenant_id,
+            project_id=project.id,
+            item_id=item.id,
+            created_by=actor,
+            updated_by=actor,
+        )
+        session.add(response)
+
+    response.response_value = response_value
+    response.comment = comment
+    response.answered_by = actor
+    response.answered_at = now
+    response.updated_by = actor
+
+    await session.flush()
+    return response
+
+
+async def record_stage_decision(
+    session: AsyncSession,
+    project: Project,
+    *,
+    outcome: StageDecisionOutcome,
+    conditions: str | None,
+    actor: str,
+) -> StageDecision:
+    """Section 31.2's own completion rule applied here: "mark N/A and
+    provide a reason; do not leave control fields ambiguous." Every active
+    checklist item at the project's current stage must already have an
+    answer (Yes, No, or Not Applicable — any of the three, not just Yes)
+    before ANY decision can be recorded, not only an advancing one — a
+    DECLINE recorded against an incomplete checklist would be exactly the
+    ambiguity that rule exists to prevent."""
+    items_result = await session.execute(
+        select(StageChecklistItem.id).where(
+            StageChecklistItem.stage_id == project.current_stage_id,
+            StageChecklistItem.is_active.is_(True),
+        )
+    )
+    item_ids = {row[0] for row in items_result.all()}
+    if not item_ids:
+        raise IllegalStageAdvancement(
+            f"Project {project.id}'s current stage has no checklist configured — nothing to "
+            "decide on."
+        )
+
+    responses_result = await session.execute(
+        select(StageChecklistResponse.item_id).where(
+            StageChecklistResponse.project_id == project.id,
+            StageChecklistResponse.item_id.in_(item_ids),
+            StageChecklistResponse.response_value.is_not(None),
+        )
+    )
+    answered_ids = {row[0] for row in responses_result.all()}
+    unanswered_count = len(item_ids - answered_ids)
+    if unanswered_count > 0:
+        raise IllegalStageAdvancement(
+            f"{unanswered_count} checklist item(s) at the current stage are still "
+            "unanswered — cannot record a decision yet."
+        )
+
+    decision = StageDecision(
+        id=uuid.uuid4(),
+        tenant_id=project.tenant_id,
+        project_id=project.id,
+        stage_id=project.current_stage_id,
+        outcome=outcome,
+        conditions=conditions,
+        decided_by=actor,
+        decided_at=datetime.now(UTC),
+    )
+    session.add(decision)
     await session.flush()
     return decision
 

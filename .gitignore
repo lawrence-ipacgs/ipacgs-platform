@@ -32,3 +32,6 @@ infra/bicep/**/*.json
 .DS_Store
 .vscode/
 .idea/
+
+# Office lock files — leftover from an open .docx/.xlsx, never real content
+docs/~$*

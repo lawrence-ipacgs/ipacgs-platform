@@ -101,13 +101,24 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   Map" document (`docs/`). That document's own overview describes a real
   5-phase, 22-step lifecycle; only Phase 1 has been shared in detail so
   far, so the seeded sequence stops at stage 7 until Phases 2-5 arrive.
-  One honest known mismatch this surfaced: advancing a project's stage
-  still unconditionally requires an accepted OPBOH assessment — the right
-  rule for a compliance checkpoint, but not what UACOC's own document
-  describes gating these particular seven administrative stages. See
-  `services/stage_engine.py`'s module docstring for the detail; not fixed
-  yet, since a real fix needs either per-stage configurable rules or
-  confirmation from KMI/UACOC on what actually gates each step.
+  The known mismatch this surfaced — advancing a stage unconditionally
+  requiring an accepted OPBOH assessment, not what UACOC's own document
+  describes gating these seven administrative stages — is now fixed: the
+  **Stage Checklist Engine** (`models/stage_checklist.py`,
+  `scripts/seed_stage_checklists.py`). Each `INTK-*` stage gets its own
+  real exit-criteria checklist, sourced verbatim from that same Process
+  Map document's per-stage Entry/Exit Criteria panels; `advance_stage`
+  checks whether the current stage has one configured and, if so, requires
+  a recorded PROCEED/PROCEED_WITH_CONDITIONS `StageDecision` (its outcome
+  vocabulary sourced from `docs/Combined_Project_Admission_and_Onboarding_
+  Publication FV1.docx`'s Sections 27 & 33) instead of an OPBOH assessment.
+  A stage with no checklist configured still falls back to the original
+  OPBOH-assessment path unchanged — where a future OPBOH-gated stage (the
+  Process Map's own Phase 2 "Diagnostic assessment," right after
+  Onboarding) will keep working with zero code change. Two honest limits:
+  no evidence-document linking on a checklist response yet (free-text
+  `comment` only, unlike OPBOH's `OpbohResponseEvidence`), and Phases 2-5
+  of the real 22-step lifecycle still have no source material.
 - **Epic 4/5 gap-closing**: the real ticket lists for Epics 4 and 5 turned
   out to be bigger than what those two epics originally shipped — see git
   history for the reconciliation. Closed since: illustrative metadata for
