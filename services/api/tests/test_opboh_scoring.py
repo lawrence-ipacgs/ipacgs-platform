@@ -11,6 +11,7 @@ from ipacgs.services.opboh_scoring import (
     DomainInput,
     QuestionScore,
     ResponseValue,
+    baseline_opinion,
     score_assessment,
     score_domain,
 )
@@ -231,3 +232,59 @@ def test_empty_assessment_scores_zero_but_is_vacuously_clean() -> None:
     assert result.assurance_score == 0.0
     assert result.is_clean is True  # vacuously — no domains means nothing failed
     assert result.domain_results == ()
+
+
+# ---------------------------------------------------------------------------
+# baseline_opinion — FW-OPBOH-014. Deterministic prose over AssessmentResult;
+# same "no averaging concealment" property, checked in words instead of numbers.
+# ---------------------------------------------------------------------------
+
+
+def test_baseline_opinion_green_recommends_proceed() -> None:
+    domain = DomainInput(
+        domain_id="d1", name="Domain", weight=1.0, min_score_threshold=3.0, questions=(_q("q1"),)
+    )
+    opinion = baseline_opinion(score_assessment((domain,)))
+    assert opinion.rag.value == "green"
+    assert opinion.recommendation == "Proceed"
+    assert opinion.headline == "Green — Proceed"
+
+
+def test_baseline_opinion_names_the_critical_failure_even_with_a_high_number() -> None:
+    """Same fixture shape as the "high score does not conceal a critical
+    failure" scoring test above — the opinion's narrative has to actually
+    name the failed control, not just say "issues were found"."""
+    questions = tuple(_q(f"easy-{i}", score=5.0) for i in range(9)) + (
+        _q("critical-1", critical=True, score=0.0),
+    )
+    domain = DomainInput(
+        domain_id="d1", name="Domain", weight=1.0, min_score_threshold=3.0, questions=questions
+    )
+    opinion = baseline_opinion(score_assessment((domain,)))
+    assert opinion.rag.value == "red"
+    assert opinion.recommendation == "Do Not Proceed"
+    assert "objective-critical-1" in opinion.narrative
+    assert "1 unresolved critical-control failure" in opinion.narrative
+
+
+def test_baseline_opinion_names_a_domain_below_its_own_threshold() -> None:
+    """A domain can fail its own threshold without dragging the overall
+    assurance score below Green — the opinion still has to say so, by
+    name, rather than only ever reporting the composite number."""
+    weak_domain = DomainInput(
+        domain_id="d1",
+        name="Sponsor Readiness",
+        weight=1.0,
+        min_score_threshold=4.5,
+        questions=(_q("q1", score=3.5),),
+    )
+    strong_domain = DomainInput(
+        domain_id="d2", name="Strong", weight=1.0, min_score_threshold=3.0, questions=(_q("q2"),)
+    )
+    result = score_assessment((weak_domain, strong_domain))
+    assert result.all_domains_meet_threshold is False
+
+    opinion = baseline_opinion(result)
+    assert opinion.rag.value == result.rag.value
+    assert "Sponsor Readiness" in opinion.narrative
+    assert "Strong" not in opinion.narrative

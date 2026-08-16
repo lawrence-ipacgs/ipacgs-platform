@@ -184,6 +184,112 @@ async def test_full_lifecycle_clean_accept(
     assert decide_resp.json()["approved_by"] == "dave"
 
 
+async def test_bill_of_health_reflects_clean_accept(
+    client: AsyncClient,
+    organisation: Organisation,
+    catalogue: tuple[OpbohFrameworkVersion, OpbohQuestion, OpbohQuestion],
+) -> None:
+    _version, critical_q, ordinary_q = catalogue
+
+    _as("alice")
+    create_resp = await client.post(
+        "/opboh/assessments", json={"organisation_id": str(organisation.id)}
+    )
+    assessment_id = create_resp.json()["id"]
+
+    for q in (critical_q, ordinary_q):
+        await client.post(
+            f"/opboh/assessments/{assessment_id}/responses",
+            json={
+                "question_id": str(q.id),
+                "response_value": "yes",
+                "score": 5,
+                "evidence_sufficiency_factor": 1.0,
+            },
+        )
+    await client.post(f"/opboh/assessments/{assessment_id}/submit")
+    _as("bob")
+    await client.post(f"/opboh/assessments/{assessment_id}/begin-assessment")
+    _as("carol")
+    await client.post(f"/opboh/assessments/{assessment_id}/independently-review")
+    _as("dave")
+    await client.post(f"/opboh/assessments/{assessment_id}/decide", json={"decision": "accepted"})
+
+    report_resp = await client.get(f"/opboh/assessments/{assessment_id}/bill-of-health")
+    assert report_resp.status_code == 200, report_resp.text
+    body = report_resp.json()
+    assert body["status"] == "accepted"
+    assert body["score"]["rag"] == "green"
+    assert body["opinion"]["rag"] == "green"
+    assert body["opinion"]["recommendation"] == "Proceed"
+    assert body["opinion"]["headline"] == "Green — Proceed"
+    assert body["open_findings"] == []
+
+
+async def test_bill_of_health_names_the_critical_failure(
+    client: AsyncClient,
+    organisation: Organisation,
+    catalogue: tuple[OpbohFrameworkVersion, OpbohQuestion, OpbohQuestion],
+) -> None:
+    """A critical-control failure shows up in the opinion's rag/narrative.
+    It does NOT currently also appear in open_findings — nothing in this
+    codebase calls opboh_findings.create_finding yet, for a critical
+    failure or anything else, and there's no route to create one by hand
+    either (only assign/close/escalate on a finding that already exists).
+    That's a separate, real gap this report doesn't paper over: it reports
+    open_findings exactly as empty as they actually are."""
+    _version, critical_q, ordinary_q = catalogue
+
+    _as("alice")
+    create_resp = await client.post(
+        "/opboh/assessments", json={"organisation_id": str(organisation.id)}
+    )
+    assessment_id = create_resp.json()["id"]
+
+    await client.post(
+        f"/opboh/assessments/{assessment_id}/responses",
+        json={
+            "question_id": str(critical_q.id),
+            "response_value": "no",
+            "score": 0,
+            "evidence_sufficiency_factor": 1.0,
+        },
+    )
+    await client.post(
+        f"/opboh/assessments/{assessment_id}/responses",
+        json={
+            "question_id": str(ordinary_q.id),
+            "response_value": "yes",
+            "score": 5,
+            "evidence_sufficiency_factor": 1.0,
+        },
+    )
+    await client.post(f"/opboh/assessments/{assessment_id}/submit")
+    _as("bob")
+    await client.post(f"/opboh/assessments/{assessment_id}/begin-assessment")
+    _as("carol")
+    await client.post(f"/opboh/assessments/{assessment_id}/independently-review")
+    _as("dave")
+    await client.post(
+        f"/opboh/assessments/{assessment_id}/decide",
+        json={"decision": "conditionally_accepted", "decision_summary": "Pending fix."},
+    )
+
+    report_resp = await client.get(f"/opboh/assessments/{assessment_id}/bill-of-health")
+    assert report_resp.status_code == 200, report_resp.text
+    body = report_resp.json()
+    assert body["status"] == "conditionally_accepted"
+    assert body["opinion"]["rag"] == "red"
+    assert body["opinion"]["recommendation"] == "Do Not Proceed"
+    assert critical_q.control_objective in body["opinion"]["narrative"]
+    assert body["open_findings"] == []  # see docstring above — a real, separate gap
+
+
+async def test_bill_of_health_for_an_unknown_assessment_is_404(client: AsyncClient) -> None:
+    resp = await client.get(f"/opboh/assessments/{uuid.uuid4()}/bill-of-health")
+    assert resp.status_code == 404
+
+
 async def test_critical_failure_blocks_accept_over_http(
     client: AsyncClient,
     organisation: Organisation,

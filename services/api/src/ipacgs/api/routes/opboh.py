@@ -20,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ipacgs.api.schemas.opboh import (
     AssessmentOut,
     AssignFindingRequest,
+    BaselineOpinionOut,
+    BillOfHealthReportOut,
     CreateAssessmentRequest,
     CriticalFailureOut,
     DecideRequest,
@@ -41,7 +43,7 @@ from ipacgs.models.opboh import (
 )
 from ipacgs.models.organisation import Organisation
 from ipacgs.models.project import Project
-from ipacgs.services import opboh_findings, opboh_workflow
+from ipacgs.services import opboh_findings, opboh_report, opboh_workflow
 from ipacgs.services.opboh_query import compute_assessment_score
 from ipacgs.services.opboh_scoring import AssessmentResult
 
@@ -173,6 +175,42 @@ async def get_assessment_score(
     assessment = await _get_assessment_or_404(db, assessment_id)
     result = await compute_assessment_score(db, assessment)
     return _score_to_schema(result)
+
+
+@router.get("/assessments/{assessment_id}/bill-of-health", response_model=BillOfHealthReportOut)
+async def get_bill_of_health(
+    assessment_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+) -> BillOfHealthReportOut:
+    """`FW-OPBOH-010`/`014` — the score, the system's own baseline opinion
+    of it, and whatever's still unresolved, assembled in one response
+    instead of the three separate calls a reader would otherwise have to
+    make and reconcile themselves."""
+    assessment = await _get_assessment_or_404(db, assessment_id)
+    report = await opboh_report.build_bill_of_health(db, assessment)
+    return BillOfHealthReportOut(
+        assessment_id=report.assessment_id,
+        organisation_id=report.organisation_id,
+        project_id=report.project_id,
+        status=assessment.status,
+        prepared_by=report.prepared_by,
+        assessed_by=report.assessed_by,
+        reviewed_by=report.reviewed_by,
+        approved_by=report.approved_by,
+        decision_summary=report.decision_summary,
+        score=_score_to_schema(report.score),
+        opinion=BaselineOpinionOut(
+            rag=report.opinion.rag.value,
+            headline=report.opinion.headline,
+            narrative=report.opinion.narrative,
+            recommendation=report.opinion.recommendation,
+        ),
+        # Explicit model_validate, not a bare list() — this is a direct
+        # Python construction of BillOfHealthReportOut, not a FastAPI
+        # response_model conversion (unlike list_findings' bare `return
+        # list(...)` below), so mypy holds it to FindingOut, not the ORM
+        # OpbohFinding rows report.open_findings actually contains.
+        open_findings=[FindingOut.model_validate(f) for f in report.open_findings],
+    )
 
 
 @router.post("/assessments/{assessment_id}/responses", response_model=ResponseOut)

@@ -56,7 +56,7 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   the versioned/configurable catalogue, the scoring engine
   (`services/opboh_scoring.py`), the assessment state machine and
   segregation-of-duties enforcement (`services/opboh_workflow.py`), findings,
-  and 19 HTTP routes exposing all of it (`api/routes/opboh.py`,
+  and 18 HTTP routes exposing all of it (`api/routes/opboh.py`,
   `api/routes/evidence.py`). The catalogue content is still an
   **illustrative placeholder**, not KMI Africa's real OPBOH question bank —
   see `scripts/seed_opboh_catalogue.py`'s docstring. The *scoring* is real,
@@ -68,7 +68,19 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   That's a summary infographic, not the full question bank, so a few
   specifics (how Y/N/N-A maps to score, how one evidence factor is
   determined) are this codebase's own documented interpretation — see
-  `services/opboh_scoring.py`'s module docstring.
+  `services/opboh_scoring.py`'s module docstring. `FW-OPBOH-010`/`014`'s
+  bill-of-health report (`GET /opboh/assessments/{id}/bill-of-health`,
+  `services/opboh_report.py`) closes the last two tickets that were still
+  open on this epic's own list: the score, a deterministic baseline opinion
+  computed from it (`opboh_scoring.baseline_opinion` — plain-language RAG
+  reading, never generative), and this assessment's still-unresolved
+  findings, in one response. That last part currently always returns
+  empty, honestly: nothing in this codebase actually creates an
+  `OpbohFinding` yet, for a critical-control failure or anything else —
+  `services/opboh_findings.py`'s `create_finding` exists but is never
+  called, and there's no route to create one by hand either, only to
+  assign/close/escalate one that already exists. A real gap, not papered
+  over by the report.
 - **Epic 4 — Framework Registry**: a generic `Framework`/`FrameworkVersion`
   registry (`models/framework.py`, `services/framework_registry.py`,
   `api/routes/framework.py`) that OPBOH is now registered *into* rather than

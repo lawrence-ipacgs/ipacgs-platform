@@ -1,5 +1,8 @@
 """The scoring engine — `FW-OPBOH-005`: "domain scores, critical-control
-failures... without averaging concealment."
+failures... without averaging concealment." Also carries `baseline_opinion`
+(`FW-OPBOH-014`) — the deterministic prose reading of an `AssessmentResult`
+that `services/opboh_report.py`'s bill-of-health report (`FW-OPBOH-010`)
+is built around.
 
 Deliberately pure functions over plain dataclasses, not SQLAlchemy models —
 this is the one part of Epic 3 that most benefits from being fully unit-
@@ -258,4 +261,59 @@ def score_assessment(domains: tuple[DomainInput, ...]) -> AssessmentResult:
         assurance_score=assurance_score,
         domain_results=domain_results,
         critical_failures=all_failures,
+    )
+
+
+@dataclass(frozen=True)
+class BaselineOpinion:
+    """`FW-OPBOH-014` — the bill-of-health report's baseline opinion: the
+    system's own reading of `AssessmentResult` alone, independent of
+    whatever a human approver ultimately decides
+    (`opboh_workflow.decide`). The report (`services/opboh_report.py`)
+    shows this next to the actual recorded decision so a reader can see
+    whether the two agree, rather than only ever seeing whichever one was
+    recorded last."""
+
+    rag: RagBand
+    headline: str
+    narrative: str
+    recommendation: str
+
+
+_RECOMMENDATION_BY_RAG: dict[RagBand, str] = {
+    RagBand.GREEN: "Proceed",
+    RagBand.AMBER: "Proceed with Conditions",
+    RagBand.RED: "Do Not Proceed",
+}
+
+
+def baseline_opinion(result: AssessmentResult) -> BaselineOpinion:
+    """Deterministic, not generative — every word here traces back to a
+    field already on `result`, the same "no averaging concealment"
+    principle applied to prose instead of a number. A critical failure is
+    named explicitly rather than folded into "some issues were found"."""
+    recommendation = _RECOMMENDATION_BY_RAG[result.rag]
+    headline = f"{result.rag.value.capitalize()} — {recommendation}"
+
+    if result.has_critical_failure:
+        objectives = ", ".join(f.control_objective for f in result.critical_failures)
+        narrative = (
+            f"Automatic Red: {len(result.critical_failures)} unresolved critical-control "
+            f"failure(s) — {objectives}. This stands regardless of the "
+            f"{result.assurance_score:.1f}/100 assurance score; no averaging conceals it."
+        )
+    elif not result.all_domains_meet_threshold:
+        failing = ", ".join(d.name for d in result.domain_results if not d.meets_threshold)
+        narrative = (
+            f"Assurance score {result.assurance_score:.1f}/100 ({result.rag.value}) — "
+            f"below its own threshold in: {failing}."
+        )
+    else:
+        narrative = (
+            f"Assurance score {result.assurance_score:.1f}/100 ({result.rag.value}) — "
+            "every domain at or above its own threshold, no critical-control failures."
+        )
+
+    return BaselineOpinion(
+        rag=result.rag, headline=headline, narrative=narrative, recommendation=recommendation
     )
