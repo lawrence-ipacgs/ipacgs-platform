@@ -119,3 +119,36 @@ class FindingOut(BaseModel):
 class AssignFindingRequest(BaseModel):
     owner: str
     due_date: date
+
+
+class BaselineOpinionOut(BaseModel):
+    rag: str = Field(description="red/amber/green — same banding as ScoreOut.rag.")
+    headline: str = Field(description='e.g. "Green — Proceed".')
+    narrative: str = Field(
+        description="Deterministic prose reading of the score — see "
+        "services/opboh_scoring.py's baseline_opinion()."
+    )
+    recommendation: str = Field(description="Proceed / Proceed with Conditions / Do Not Proceed.")
+
+
+class BillOfHealthReportOut(BaseModel):
+    """`FW-OPBOH-010`/`014` — the report and the baseline opinion it
+    carries. `opinion` is the system's own reading of `score` alone;
+    `status`/`decision_summary` are whatever a human actually decided,
+    which may or may not agree with it — the report shows both rather than
+    picking one."""
+
+    assessment_id: uuid.UUID
+    organisation_id: uuid.UUID
+    project_id: uuid.UUID | None
+    status: OpbohAssessmentStatus
+    prepared_by: str
+    assessed_by: str | None
+    reviewed_by: str | None
+    approved_by: str | None
+    decision_summary: str | None
+    score: ScoreOut
+    opinion: BaselineOpinionOut
+    open_findings: list[FindingOut] = Field(
+        description="Not CLOSED — OPEN, IN_PROGRESS or ESCALATED."
+    )
