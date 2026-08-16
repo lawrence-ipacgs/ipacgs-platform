@@ -23,6 +23,11 @@ from ipacgs.models.opboh import (
 )
 from ipacgs.models.organisation import Organisation
 from ipacgs.models.project import Project, Stage
+from ipacgs.models.stage_checklist import (
+    ChecklistResponseValue,
+    StageChecklistItem,
+    StageDecisionOutcome,
+)
 from ipacgs.models.tenant import Tenant
 from ipacgs.services.stage_engine import (
     IllegalStageAdvancement,
@@ -33,6 +38,8 @@ from ipacgs.services.stage_engine import (
     compute_project_rag,
     create_project,
     list_open_findings_for_project,
+    record_checklist_response,
+    record_stage_decision,
     reopen_stage,
 )
 
@@ -77,6 +84,26 @@ async def _make_stages(db_session: AsyncSession, count: int) -> list[Stage]:
     db_session.add_all(stages)
     await db_session.flush()
     return stages
+
+
+async def _make_checklist_items(
+    db_session: AsyncSession, stage: Stage, criteria: list[str]
+) -> list[StageChecklistItem]:
+    items = [
+        StageChecklistItem(
+            id=uuid.uuid4(),
+            stage_id=stage.id,
+            sequence=(i + 1) * 10,
+            criterion=criterion,
+            is_active=True,
+            created_by="seed",
+            updated_by="seed",
+        )
+        for i, criterion in enumerate(criteria)
+    ]
+    db_session.add_all(items)
+    await db_session.flush()
+    return items
 
 
 async def _make_assessment(
@@ -219,6 +246,185 @@ async def test_advance_stage_at_the_final_stage_raises(db_session: AsyncSession)
 
     with pytest.raises(IllegalStageAdvancement, match="final configured stage"):
         await advance_stage(db_session, project, supporting_assessment=assessment, actor="alice")
+
+
+# ---------------------------------------------------------------------------
+# Stage Checklist Engine — real per-stage entry/exit criteria
+# ---------------------------------------------------------------------------
+
+
+async def test_advance_stage_without_a_checklist_still_needs_an_opboh_assessment(
+    db_session: AsyncSession,
+) -> None:
+    """Regression: a stage with nothing in stage_checklist_items configured
+    for it (every stage _make_stages produces, same as before this engine
+    existed) falls back to the original OPBOH-assessment path unchanged —
+    not "None was passed" silently succeeding."""
+    org = await _make_tenant_and_org(db_session)
+    await _make_stages(db_session, 2)
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+
+    with pytest.raises(IllegalStageAdvancement, match="no checklist configured"):
+        await advance_stage(db_session, project, actor="alice")
+
+
+async def test_advance_stage_with_a_checklist_configured_ignores_an_opboh_assessment(
+    db_session: AsyncSession,
+) -> None:
+    """The other direction: once a stage has its own checklist, an
+    accepted OPBOH assessment alone isn't enough — no StageDecision
+    recorded yet means no advance, regardless of what's passed in."""
+    org = await _make_tenant_and_org(db_session)
+    stages = await _make_stages(db_session, 2)
+    await _make_checklist_items(db_session, stages[0], ["Criterion A", "Criterion B"])
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+    assessment = await _make_assessment(db_session, org, status=OpbohAssessmentStatus.ACCEPTED)
+
+    with pytest.raises(IllegalStageAdvancement, match="its own checklist configured"):
+        await advance_stage(db_session, project, supporting_assessment=assessment, actor="alice")
+
+
+async def test_record_stage_decision_rejects_unanswered_items(db_session: AsyncSession) -> None:
+    org = await _make_tenant_and_org(db_session)
+    stages = await _make_stages(db_session, 2)
+    items = await _make_checklist_items(db_session, stages[0], ["Criterion A", "Criterion B"])
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+    await record_checklist_response(
+        db_session,
+        project,
+        items[0],
+        response_value=ChecklistResponseValue.YES,
+        comment=None,
+        actor="alice",
+    )
+
+    with pytest.raises(IllegalStageAdvancement, match="1 checklist item"):
+        await record_stage_decision(
+            db_session,
+            project,
+            outcome=StageDecisionOutcome.PROCEED,
+            conditions=None,
+            actor="dave",
+        )
+
+
+async def test_record_checklist_response_rejects_an_item_from_a_different_stage(
+    db_session: AsyncSession,
+) -> None:
+    org = await _make_tenant_and_org(db_session)
+    stages = await _make_stages(db_session, 2)
+    other_stage_items = await _make_checklist_items(db_session, stages[1], ["Criterion X"])
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+
+    with pytest.raises(IllegalStageAdvancement, match="different stage"):
+        await record_checklist_response(
+            db_session,
+            project,
+            other_stage_items[0],
+            response_value=ChecklistResponseValue.YES,
+            comment=None,
+            actor="alice",
+        )
+
+
+async def test_a_decline_decision_still_blocks_advancement(db_session: AsyncSession) -> None:
+    """Answering every item doesn't itself unlock the stage — the recorded
+    outcome has to actually be an advancing one. DECLINE is a real, named
+    way to not proceed, not just an incomplete PROCEED."""
+    org = await _make_tenant_and_org(db_session)
+    stages = await _make_stages(db_session, 2)
+    items = await _make_checklist_items(db_session, stages[0], ["Criterion A"])
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+    await record_checklist_response(
+        db_session,
+        project,
+        items[0],
+        response_value=ChecklistResponseValue.NO,
+        comment="Not met.",
+        actor="alice",
+    )
+    await record_stage_decision(
+        db_session, project, outcome=StageDecisionOutcome.DECLINE, conditions=None, actor="dave"
+    )
+
+    with pytest.raises(IllegalStageAdvancement, match="its own checklist configured"):
+        await advance_stage(db_session, project, actor="alice")
+
+
+async def test_advance_stage_succeeds_via_a_proceed_decision_with_no_assessment(
+    db_session: AsyncSession,
+) -> None:
+    """The real replacement path end to end: answer every item, record a
+    PROCEED decision, advance with no OPBOH assessment at all."""
+    org = await _make_tenant_and_org(db_session)
+    stages = await _make_stages(db_session, 2)
+    items = await _make_checklist_items(db_session, stages[0], ["Criterion A", "Criterion B"])
+    project = await create_project(
+        db_session,
+        tenant_id=org.tenant_id,
+        organisation_id=org.id,
+        name="Test Project",
+        description=None,
+        actor="alice",
+    )
+    for item in items:
+        await record_checklist_response(
+            db_session,
+            project,
+            item,
+            response_value=ChecklistResponseValue.YES,
+            comment=None,
+            actor="alice",
+        )
+    await record_stage_decision(
+        db_session,
+        project,
+        outcome=StageDecisionOutcome.PROCEED_WITH_CONDITIONS,
+        conditions="Confirm outstanding item next stage.",
+        actor="dave",
+    )
+
+    decision = await advance_stage(db_session, project, actor="alice")
+
+    assert decision.from_stage_id == stages[0].id
+    assert decision.to_stage_id == stages[1].id
+    assert decision.supporting_assessment_id is None
+    assert project.current_stage_id == stages[1].id
 
 
 # ---------------------------------------------------------------------------

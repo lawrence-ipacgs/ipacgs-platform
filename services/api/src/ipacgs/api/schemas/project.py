@@ -6,6 +6,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict
 
 from ipacgs.models.project import ProjectStatus, StageGateDecisionKind
+from ipacgs.models.stage_checklist import ChecklistResponseValue, StageDecisionOutcome
 from ipacgs.services.stage_engine import RagStatus
 
 
@@ -47,7 +48,10 @@ class ProjectOut(BaseModel):
 
 
 class AdvanceStageRequest(BaseModel):
-    supporting_assessment_id: uuid.UUID
+    # Optional since the Stage Checklist Engine: a stage with its own
+    # checklist configured (services/stage_engine.py) advances on a
+    # recorded StageDecision instead — see that module's docstring.
+    supporting_assessment_id: uuid.UUID | None = None
     notes: str | None = None
 
 
@@ -77,6 +81,55 @@ class StageGateDecisionOut(BaseModel):
 
 class RagOut(BaseModel):
     status: RagStatus
+
+
+class ChecklistItemOut(BaseModel):
+    """One checklist item paired with this project's current response to
+    it (if any) — not `from_attributes`, same reasoning `ProjectSummaryOut`
+    documents for itself: built by hand from two separately-queried
+    pieces, not one ORM row."""
+
+    item_id: uuid.UUID
+    sequence: int
+    criterion: str
+    response_value: ChecklistResponseValue | None
+    comment: str | None
+    answered_by: str | None
+    answered_at: datetime | None
+
+
+class RespondChecklistRequest(BaseModel):
+    response_value: ChecklistResponseValue
+    comment: str | None = None
+
+
+class ChecklistResponseOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    item_id: uuid.UUID
+    response_value: ChecklistResponseValue | None
+    comment: str | None
+    answered_by: str | None
+    answered_at: datetime | None
+
+
+class StageDecisionRequest(BaseModel):
+    outcome: StageDecisionOutcome
+    conditions: str | None = None
+
+
+class StageDecisionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    stage_id: uuid.UUID
+    outcome: StageDecisionOutcome
+    conditions: str | None
+    decided_by: str
+    decided_at: datetime
 
 
 class ProjectSummaryOut(BaseModel):

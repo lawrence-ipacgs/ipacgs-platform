@@ -35,6 +35,13 @@ from ipacgs.models.project import (
     StageGateDecision,
     StageGateDecisionKind,
 )
+from ipacgs.models.stage_checklist import (
+    ChecklistResponseValue,
+    StageChecklistItem,
+    StageChecklistResponse,
+    StageDecision,
+    StageDecisionOutcome,
+)
 from ipacgs.models.tenant import Tenant, TenantStatus
 
 __all__ = [
@@ -66,10 +73,15 @@ __all__ = [
     "OpbohResponseEvidence",
     "Organisation",
     "OrganisationDuplicateCheck",
+    "ChecklistResponseValue",
     "Person",
     "Project",
     "ProjectStatus",
     "Stage",
+    "StageChecklistItem",
+    "StageChecklistResponse",
+    "StageDecision",
+    "StageDecisionOutcome",
     "StageGateDecision",
     "StageGateDecisionKind",
     "Tenant",
