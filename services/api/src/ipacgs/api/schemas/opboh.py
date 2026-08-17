@@ -77,6 +77,13 @@ class DecideRequest(BaseModel):
     decision_summary: str | None = None
 
 
+class ReopenAssessmentRequest(BaseModel):
+    reason: str = Field(
+        description="Required — withdrawing confidence in an already-decided assessment "
+        "can never be silent or unexplained."
+    )
+
+
 class CriticalFailureOut(BaseModel):
     question_id: str
     control_objective: str

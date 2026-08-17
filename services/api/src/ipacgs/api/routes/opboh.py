@@ -28,6 +28,7 @@ from ipacgs.api.schemas.opboh import (
     DecideRequest,
     DomainResultOut,
     FindingOut,
+    ReopenAssessmentRequest,
     ResponseOut,
     ScoreOut,
     UpsertResponseRequest,
@@ -349,6 +350,26 @@ async def decide_route(
         assurance_score=result.assurance_score,
         decision_summary=body.decision_summary,
         correlation_id=uuid.uuid4(),
+    )
+    await db.commit()
+    await db.refresh(assessment)
+    return assessment
+
+
+@router.post("/assessments/{assessment_id}/reopen", response_model=AssessmentOut)
+async def reopen_assessment_route(
+    assessment_id: uuid.UUID,
+    body: ReopenAssessmentRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> OpbohAssessment:
+    """Only reachable from ACCEPTED/CONDITIONALLY_ACCEPTED/REJECTED — the
+    `IllegalTransition` `opboh_workflow.reopen_assessment` raises otherwise
+    (a missing reason, or an assessment that was never decided) is handled
+    globally (`main.py`), not caught here."""
+    assessment = await _get_assessment_or_404(db, assessment_id)
+    await opboh_workflow.reopen_assessment(
+        db, assessment, reason=body.reason, actor=user.object_id, correlation_id=uuid.uuid4()
     )
     await db.commit()
     await db.refresh(assessment)

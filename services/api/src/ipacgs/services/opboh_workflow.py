@@ -13,6 +13,13 @@ this codebase ever called `opboh_findings.create_finding`. It now does,
 right here, the one place a critical failure is confirmed as part of a real
 decision (see `_create_findings_for_critical_failures` below) — `FW-OPBOH-008`
 ("owned, dated, escalating actions"), not just a score on a report.
+
+`reopen_assessment` closes the gap that surfaced building the finding
+idempotency test above: the state graph has always allowed moving an
+ACCEPTED/CONDITIONALLY_ACCEPTED/REJECTED assessment back through REOPENED
+to DRAFT, but nothing exposed it — `simple_transition` refuses both targets
+outright now, specifically so `reopen_assessment`'s required reason can't be
+bypassed by calling the generic function instead.
 """
 
 import uuid
@@ -305,6 +312,63 @@ async def _create_findings_for_critical_failures(
         )
 
 
+async def reopen_assessment(
+    session: AsyncSession,
+    assessment: OpbohAssessment,
+    *,
+    reason: str,
+    actor: str,
+    correlation_id: uuid.UUID,
+) -> TransitionResult:
+    """The other direction FW-OPBOH-015's fatal-flaw block doesn't cover:
+    not "can this be accepted" but "what happens when confidence in an
+    already-decided assessment turns out to be wrong" (evidence withdrawn,
+    a fraud indicator, a reviewer catching something later) — same
+    reasoning `stage_engine.reopen_stage` documents for itself. No
+    segregation-of-duties check: reopening withdraws confidence, it isn't a
+    new decision that needs its own distinct decision-maker — but a reason
+    is required, so this can never be a silent, unexplained rewind.
+
+    Moves straight through REOPENED to DRAFT in one call, recorded as two
+    separate audit events even though the assessment's own observable
+    status lands on DRAFT — REOPENED on its own is a transient marker
+    nobody needs to act on separately, not a state worth stopping at.
+    """
+    if not reason.strip():
+        raise IllegalTransition("Reopening an assessment requires a reason.")
+    _require_legal(assessment.status, OpbohAssessmentStatus.REOPENED)
+
+    previous = assessment.status
+    assessment.status = OpbohAssessmentStatus.REOPENED
+    await record_audit_event(
+        session,
+        tenant_id=assessment.tenant_id,
+        actor_object_id=actor,
+        action=AuditAction.CHANGE,
+        entity_type="opboh_assessment",
+        entity_id=assessment.id,
+        correlation_id=correlation_id,
+        before_values={"status": previous.value},
+        after_values={"status": assessment.status.value, "reason": reason},
+    )
+
+    before_draft = assessment.status
+    assessment.status = OpbohAssessmentStatus.DRAFT
+    await record_audit_event(
+        session,
+        tenant_id=assessment.tenant_id,
+        actor_object_id=actor,
+        action=AuditAction.CHANGE,
+        entity_type="opboh_assessment",
+        entity_id=assessment.id,
+        correlation_id=correlation_id,
+        before_values={"status": before_draft.value},
+        after_values={"status": assessment.status.value},
+    )
+
+    return TransitionResult(assessment.id, previous, assessment.status)
+
+
 async def simple_transition(
     session: AsyncSession,
     assessment: OpbohAssessment,
@@ -314,10 +378,20 @@ async def simple_transition(
     correlation_id: uuid.UUID,
 ) -> TransitionResult:
     """The transitions with no segregation-of-duties rule attached — moving
-    into EVIDENCE_REQUESTED, SUBMITTED, CLARIFICATION_REQUESTED, REOPENED.
-    Still validated against the state graph and still audited; just no
+    into EVIDENCE_REQUESTED, SUBMITTED, CLARIFICATION_REQUESTED. Still
+    validated against the state graph and still audited; just no
     `_require_distinct` check, because nothing in the SRS calls for one at
-    these points."""
+    these points.
+
+    REOPENED and DRAFT (only reachable from REOPENED) are deliberately
+    refused here even though `_ALLOWED_TRANSITIONS` permits them — use
+    `reopen_assessment` instead, which requires a reason this function has
+    no parameter for. Without this guard, this function would be a second,
+    weaker path to the exact same state that skips that requirement."""
+    if target in {OpbohAssessmentStatus.REOPENED, OpbohAssessmentStatus.DRAFT}:
+        raise IllegalTransition(
+            f"Use reopen_assessment to reach {target.value} — reopening requires a reason."
+        )
     _require_legal(assessment.status, target)
 
     previous = assessment.status
