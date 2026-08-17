@@ -11,6 +11,15 @@ The second one is the mechanism Section 5 of the architecture document flags
 as a real staffing constraint (FW-OPBOH-006, SOD-001/002) — it's enforced
 here, in application logic, not by Entra ID itself. Entra ID has no concept
 of "this specific record's preparer."
+
+`get_current_user` also carries a local-dev-only bypass (see its own
+docstring) — no Entra app registration exists yet
+(`infra/scripts/create-app-registrations.sh` is still a pending manual
+step), so `apps/web`'s demo UI has no real tenant to get a token from.
+`Settings.is_local` gates it: `ENVIRONMENT` is set explicitly per
+Container App (`infra/bicep/`) in every deployed environment, never
+`local`, so the bypass has no reachable path outside a developer's own
+machine.
 """
 
 from __future__ import annotations
@@ -23,7 +32,7 @@ from typing import Any, cast
 
 import httpx
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWTError
 from jwt.algorithms import RSAAlgorithm
@@ -38,7 +47,10 @@ from ipacgs.core.config import get_settings
 # at all.
 
 settings = get_settings()
-bearer_scheme = HTTPBearer(auto_error=True)
+# auto_error=False, not the default True: a local-dev request carrying no
+# bearer token at all must reach get_current_user's own body to hit the
+# is_local bypass below, rather than HTTPBearer rejecting it first.
+bearer_scheme = HTTPBearer(auto_error=False)
 
 _JWKS_CACHE: dict[str, Any] = {"keys": None, "fetched_at": 0.0}
 _JWKS_TTL_SECONDS = 3600
@@ -79,13 +91,29 @@ async def _get_jwks() -> list[dict[str, Any]]:
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    x_dev_user: str | None = Header(default=None, alias="X-Dev-User"),
 ) -> CurrentUser:
     """Validate the bearer token against Entra ID and return the principal.
 
     Not wired into every route yet — Epic 0's job is to make this mechanism
     exist and be correct; individual routes opt in as they're built.
+
+    Local-dev-only bypass: a request carrying no bearer token at all, with
+    `ENVIRONMENT=local` (`Settings.is_local` — never true outside a
+    developer's own machine, see this module's own docstring), is trusted
+    as whatever plain name it sends in `X-Dev-User` instead of a real
+    Entra ID principal. A request that *does* send a bearer token always
+    goes through real validation below regardless of environment — this
+    bypass only ever substitutes for a token that isn't there, never
+    weakens one that is.
     """
+    if credentials is None:
+        if settings.is_local:
+            actor = (x_dev_user or "dev-user").strip() or "dev-user"
+            return CurrentUser(object_id=actor, display_name=actor, roles=(), raw_claims={})
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer token.")
+
     token = credentials.credentials
     _, issuer = _authority_urls()
 

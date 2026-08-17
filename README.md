@@ -18,7 +18,7 @@ No force-pushes to `main`, no direct commits — everything lands through a revi
 ipacgs-platform/
 ├── infra/bicep/       Infrastructure as code (Azure) — Epic 0
 ├── services/api/      Python backend — FastAPI, SQLAlchemy, Alembic
-├── apps/web/          Frontend — Next.js (scaffolded when Layer/Epic 7 UI work starts)
+├── apps/web/          Frontend — Next.js, real UI against the real API (see its own README)
 ├── docs/              Setup notes, environment guide
 └── .github/workflows/ CI — lint, test, build, security scan
 ```
@@ -188,6 +188,19 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   there's no scheduler in this platform yet, so overdue-project scanning
   (`POST /notifications/scan-overdue`, WF-ESC-001…002) has to be
   triggered externally rather than running on its own.
+- **`apps/web` — a real Next.js frontend**, not a mockup: the OPBOH
+  assessment workspace (real 37-domain catalogue, real state machine, the
+  real fatal-flaw block's own error message surfaced verbatim) and the
+  stage checklist workspace (real UACOC exit criteria, real stage
+  decisions and advancement), both driving `services/api` live. Needed a
+  few small, real, previously-missing API additions along the way: `GET`/
+  `POST /organisations` (nothing exposed organisations over HTTP before),
+  `GET /opboh/framework-versions/{id}/catalogue` (nothing let a client
+  discover what to ask before answering it), and CORS + a local-dev-only
+  auth bypass (`core/security.py`'s `get_current_user`, `main.py`) —
+  both strictly gated on `ENVIRONMENT=local`, since no Entra ID app
+  registration exists yet for this frontend to get a real token from. See
+  `apps/web/README.md` for what's real, what's not, and how to run it.
 - **Release pipeline**: `.github/workflows/release-dev.yml` builds and
   deploys a real image to `dev` on every push to `main`, OIDC-authenticated,
   no stored Azure credentials — see `infra/README.md` § Release pipeline.
