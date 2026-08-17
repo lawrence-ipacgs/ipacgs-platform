@@ -121,6 +121,22 @@ class AssignFindingRequest(BaseModel):
     due_date: date
 
 
+class CreateFindingRequest(BaseModel):
+    """Manual counterpart to the findings `opboh_workflow.decide()` now
+    creates automatically for a critical-control failure — a reviewer
+    flagging something that isn't a critical-control failure at all (a
+    borderline answer, a documentation gap) still needs somewhere to put
+    it."""
+
+    severity: FindingSeverity
+    description: str
+    response_id: uuid.UUID | None = Field(
+        default=None, description="The specific response this finding is about, if any."
+    )
+    owner: str | None = None
+    due_date: date | None = None
+
+
 class BaselineOpinionOut(BaseModel):
     rag: str = Field(description="red/amber/green — same banding as ScoreOut.rag.")
     headline: str = Field(description='e.g. "Green — Proceed".')

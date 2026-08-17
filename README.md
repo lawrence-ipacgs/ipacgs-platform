@@ -56,7 +56,7 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   the versioned/configurable catalogue, the scoring engine
   (`services/opboh_scoring.py`), the assessment state machine and
   segregation-of-duties enforcement (`services/opboh_workflow.py`), findings,
-  and 18 HTTP routes exposing all of it (`api/routes/opboh.py`,
+  and 19 HTTP routes exposing all of it (`api/routes/opboh.py`,
   `api/routes/evidence.py`). The catalogue is no longer purely illustrative:
   `scripts/seed_opboh_real_catalogue.py` seeds the **real** 37-domain,
   222-question OPBOH structure (WP01-WP37, six lifecycle clusters), sourced
@@ -90,13 +90,15 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   open on this epic's own list: the score, a deterministic baseline opinion
   computed from it (`opboh_scoring.baseline_opinion` — plain-language RAG
   reading, never generative), and this assessment's still-unresolved
-  findings, in one response. That last part currently always returns
-  empty, honestly: nothing in this codebase actually creates an
-  `OpbohFinding` yet, for a critical-control failure or anything else —
-  `services/opboh_findings.py`'s `create_finding` exists but is never
-  called, and there's no route to create one by hand either, only to
-  assign/close/escalate one that already exists. A real gap, not papered
-  over by the report.
+  findings, in one response. That last part no longer always returns
+  empty: `opboh_workflow.decide()` now creates a real `OpbohFinding` for
+  each critical-control failure a decision confirms (idempotent across a
+  reopen — a control still failing on a later decision reuses its still-open
+  finding rather than duplicating it), and `POST /opboh/assessments/{id}/
+  findings` lets a reviewer create one by hand for anything that isn't a
+  critical-control failure at all. `services/opboh_findings.py`'s
+  `create_finding` — written back in Epic 3, never called until now — is
+  what both paths actually call.
 - **Epic 4 — Framework Registry**: a generic `Framework`/`FrameworkVersion`
   registry (`models/framework.py`, `services/framework_registry.py`,
   `api/routes/framework.py`) that OPBOH is now registered *into* rather than

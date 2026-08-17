@@ -23,6 +23,7 @@ from ipacgs.api.schemas.opboh import (
     BaselineOpinionOut,
     BillOfHealthReportOut,
     CreateAssessmentRequest,
+    CreateFindingRequest,
     CriticalFailureOut,
     DecideRequest,
     DomainResultOut,
@@ -332,7 +333,9 @@ async def decide_route(
 ) -> OpbohAssessment:
     """Computes the score fresh at decision time — never trusts a
     client-supplied score — then hands it to the workflow layer, which is
-    where FW-OPBOH-015's fatal-flaw block actually lives."""
+    where FW-OPBOH-015's fatal-flaw block actually lives, and where any
+    critical failure among `result.critical_failures` becomes a real
+    `OpbohFinding`, not just a number on this response."""
     assessment = await _get_assessment_or_404(db, assessment_id)
     result = await compute_assessment_score(db, assessment)
 
@@ -342,6 +345,7 @@ async def decide_route(
         decision=OpbohAssessmentStatus(body.decision),
         actor=user.object_id,
         has_critical_failure=result.has_critical_failure,
+        critical_failures=result.critical_failures,
         assurance_score=result.assurance_score,
         decision_summary=body.decision_summary,
         correlation_id=uuid.uuid4(),
@@ -349,6 +353,47 @@ async def decide_route(
     await db.commit()
     await db.refresh(assessment)
     return assessment
+
+
+@router.post(
+    "/assessments/{assessment_id}/findings",
+    response_model=FindingOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_finding_route(
+    assessment_id: uuid.UUID,
+    body: CreateFindingRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> OpbohFinding:
+    """The manual counterpart to what `decide_route` now creates on its
+    own for a critical-control failure — a reviewer flagging something
+    else entirely (a borderline answer, a documentation gap) still needs
+    somewhere to put it."""
+    assessment = await _get_assessment_or_404(db, assessment_id)
+    if body.response_id is not None:
+        response = await db.get(OpbohResponse, body.response_id)
+        if response is None or response.assessment_id != assessment_id:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                f"No response {body.response_id} on assessment {assessment_id}.",
+            )
+
+    finding = await opboh_findings.create_finding(
+        db,
+        tenant_id=assessment.tenant_id,
+        assessment_id=assessment_id,
+        response_id=body.response_id,
+        severity=body.severity,
+        description=body.description,
+        created_by=user.object_id,
+        correlation_id=uuid.uuid4(),
+        owner=body.owner,
+        due_date=body.due_date,
+    )
+    await db.commit()
+    await db.refresh(finding)
+    return finding
 
 
 @router.get("/assessments/{assessment_id}/findings", response_model=list[FindingOut])

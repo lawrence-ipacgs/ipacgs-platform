@@ -6,17 +6,40 @@ Every transition here does three things, in order: validate the transition
 is legal from the current state, enforce whatever segregation-of-duties rule
 applies to it, then persist the change with an audit event — the same
 create-inside-the-same-transaction pattern `core/audit.py` documents.
+
+`decide` also closes a gap flagged since the bill-of-health report shipped:
+a critical-control failure used to produce nothing but a number — nothing in
+this codebase ever called `opboh_findings.create_finding`. It now does,
+right here, the one place a critical failure is confirmed as part of a real
+decision (see `_create_findings_for_critical_failures` below) — `FW-OPBOH-008`
+("owned, dated, escalating actions"), not just a score on a report.
 """
 
 import uuid
 from dataclasses import dataclass
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ipacgs.core.audit import record_audit_event
 from ipacgs.core.security import MakerCheckerViolation
 from ipacgs.models.audit_event import AuditAction
-from ipacgs.models.opboh import OpbohAssessment, OpbohAssessmentStatus
+from ipacgs.models.opboh import (
+    FindingStatus,
+    OpbohAssessment,
+    OpbohAssessmentStatus,
+    OpbohFinding,
+    OpbohResponse,
+)
+from ipacgs.services import opboh_findings
+from ipacgs.services.opboh_scoring import CriticalFailure
+
+# Same set opboh_report.py's bill-of-health report already uses for "still
+# needs attention" — deliberately wider than stage_engine's own
+# OPEN/IN_PROGRESS-only set, which exists to answer a different question.
+_OPEN_FINDING_STATUSES = frozenset(
+    {FindingStatus.OPEN, FindingStatus.IN_PROGRESS, FindingStatus.ESCALATED}
+)
 
 # The legal state graph. A transition not listed here is refused outright —
 # FW-OPBOH-007 describes controlled states, not a free-for-all status field.
@@ -149,6 +172,7 @@ async def decide(
     assurance_score: float,
     decision_summary: str | None,
     correlation_id: uuid.UUID,
+    critical_failures: tuple[CriticalFailure, ...] = (),
 ) -> TransitionResult:
     """INDEPENDENTLY_REVIEWED -> ACCEPTED / CONDITIONALLY_ACCEPTED / REJECTED.
     `actor` becomes the approver — the final decision authority — and must
@@ -161,6 +185,13 @@ async def decide(
     no matter who approves it or how the rest of the score looks. Only
     CONDITIONALLY_ACCEPTED (with the condition on record) or REJECTED are
     reachable in that state.
+
+    `critical_failures` — `AssessmentResult.critical_failures`, the same
+    source `has_critical_failure` was derived from — is what actually turns
+    each failure into an `OpbohFinding` (`_create_findings_for_critical_failures`,
+    below) once the decision itself is legal. Defaults to empty for callers
+    that only care about the fatal-flaw block itself, same as
+    `has_critical_failure` alone did before this parameter existed.
     """
     if decision not in {
         OpbohAssessmentStatus.ACCEPTED,
@@ -203,7 +234,75 @@ async def decide(
             "has_critical_failure": has_critical_failure,
         },
     )
+
+    if critical_failures:
+        await _create_findings_for_critical_failures(
+            session, assessment, critical_failures, actor=actor, correlation_id=correlation_id
+        )
+
     return TransitionResult(assessment.id, previous, assessment.status)
+
+
+async def _create_findings_for_critical_failures(
+    session: AsyncSession,
+    assessment: OpbohAssessment,
+    critical_failures: tuple[CriticalFailure, ...],
+    *,
+    actor: str,
+    correlation_id: uuid.UUID,
+) -> None:
+    """Idempotent across repeated `decide()` calls on the same assessment —
+    a REOPENED assessment that gets decided again with the same control
+    still failing reuses its still-open finding rather than piling up a
+    second one for the same underlying problem. Dedup key is `response_id`
+    when a response exists; a critical control can fail as "unanswered"
+    (see `opboh_scoring._question_failure_reason`) with no `OpbohResponse`
+    row to key off at all, so an unanswered failure dedupes on its own
+    (stable, since it always names the same control) description text
+    instead.
+    """
+    question_ids = [uuid.UUID(cf.question_id) for cf in critical_failures]
+    responses_result = await session.execute(
+        select(OpbohResponse).where(
+            OpbohResponse.assessment_id == assessment.id,
+            OpbohResponse.question_id.in_(question_ids),
+        )
+    )
+    response_by_question = {r.question_id: r for r in responses_result.scalars().all()}
+
+    existing_result = await session.execute(
+        select(OpbohFinding).where(
+            OpbohFinding.assessment_id == assessment.id,
+            OpbohFinding.status.in_(_OPEN_FINDING_STATUSES),
+        )
+    )
+    existing_findings = list(existing_result.scalars().all())
+    existing_by_response = {f.response_id for f in existing_findings if f.response_id is not None}
+    existing_descriptions = {f.description for f in existing_findings if f.response_id is None}
+
+    for critical_failure in critical_failures:
+        response = response_by_question.get(uuid.UUID(critical_failure.question_id))
+        description = (
+            f"Critical control {critical_failure.control_objective!r} failed: "
+            f"{critical_failure.reason}."
+        )
+
+        if response is not None:
+            if response.id in existing_by_response:
+                continue
+        elif description in existing_descriptions:
+            continue
+
+        await opboh_findings.create_finding(
+            session,
+            tenant_id=assessment.tenant_id,
+            assessment_id=assessment.id,
+            response_id=response.id if response is not None else None,
+            severity=opboh_findings.severity_for_critical_failure(critical_failure),
+            description=description,
+            created_by=actor,
+            correlation_id=correlation_id,
+        )
 
 
 async def simple_transition(
