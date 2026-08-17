@@ -18,7 +18,7 @@ No force-pushes to `main`, no direct commits — everything lands through a revi
 ipacgs-platform/
 ├── infra/bicep/       Infrastructure as code (Azure) — Epic 0
 ├── services/api/      Python backend — FastAPI, SQLAlchemy, Alembic
-├── apps/web/          Frontend — Next.js (scaffolded when Layer/Epic 7 UI work starts)
+├── apps/web/          Frontend — Next.js, real UI against the real API (see its own README)
 ├── docs/              Setup notes, environment guide
 └── .github/workflows/ CI — lint, test, build, security scan
 ```
@@ -56,7 +56,7 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   the versioned/configurable catalogue, the scoring engine
   (`services/opboh_scoring.py`), the assessment state machine and
   segregation-of-duties enforcement (`services/opboh_workflow.py`), findings,
-  and 19 HTTP routes exposing all of it (`api/routes/opboh.py`,
+  and 20 HTTP routes exposing all of it (`api/routes/opboh.py`,
   `api/routes/evidence.py`). The catalogue is no longer purely illustrative:
   `scripts/seed_opboh_real_catalogue.py` seeds the **real** 37-domain,
   222-question OPBOH structure (WP01-WP37, six lifecycle clusters), sourced
@@ -98,7 +98,14 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   findings` lets a reviewer create one by hand for anything that isn't a
   critical-control failure at all. `services/opboh_findings.py`'s
   `create_finding` — written back in Epic 3, never called until now — is
-  what both paths actually call.
+  what both paths actually call. `POST /opboh/assessments/{id}/reopen`
+  closes the matching gap that surfaced testing the finding idempotency
+  above: the state machine has always allowed moving an ACCEPTED/
+  CONDITIONALLY_ACCEPTED/REJECTED assessment back through REOPENED to
+  DRAFT, but nothing exposed it. Requires a reason, same as
+  `stage_engine.reopen_stage`'s own convention — `opboh_workflow.
+  simple_transition` now refuses that target outright so the reason
+  requirement can't be routed around.
 - **Epic 4 — Framework Registry**: a generic `Framework`/`FrameworkVersion`
   registry (`models/framework.py`, `services/framework_registry.py`,
   `api/routes/framework.py`) that OPBOH is now registered *into* rather than
@@ -181,6 +188,19 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   there's no scheduler in this platform yet, so overdue-project scanning
   (`POST /notifications/scan-overdue`, WF-ESC-001…002) has to be
   triggered externally rather than running on its own.
+- **`apps/web` — a real Next.js frontend**, not a mockup: the OPBOH
+  assessment workspace (real 37-domain catalogue, real state machine, the
+  real fatal-flaw block's own error message surfaced verbatim) and the
+  stage checklist workspace (real UACOC exit criteria, real stage
+  decisions and advancement), both driving `services/api` live. Needed a
+  few small, real, previously-missing API additions along the way: `GET`/
+  `POST /organisations` (nothing exposed organisations over HTTP before),
+  `GET /opboh/framework-versions/{id}/catalogue` (nothing let a client
+  discover what to ask before answering it), and CORS + a local-dev-only
+  auth bypass (`core/security.py`'s `get_current_user`, `main.py`) —
+  both strictly gated on `ENVIRONMENT=local`, since no Entra ID app
+  registration exists yet for this frontend to get a real token from. See
+  `apps/web/README.md` for what's real, what's not, and how to run it.
 - **Release pipeline**: `.github/workflows/release-dev.yml` builds and
   deploys a real image to `dev` on every push to `main`, OIDC-authenticated,
   no stored Azure credentials — see `infra/README.md` § Release pipeline.

@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ipacgs.api.schemas.opboh import (
     AssessmentOut,
@@ -27,7 +28,9 @@ from ipacgs.api.schemas.opboh import (
     CriticalFailureOut,
     DecideRequest,
     DomainResultOut,
+    DomainWithQuestionsOut,
     FindingOut,
+    ReopenAssessmentRequest,
     ResponseOut,
     ScoreOut,
     UpsertResponseRequest,
@@ -37,6 +40,7 @@ from ipacgs.core.security import CurrentUser, get_current_user
 from ipacgs.models.opboh import (
     OpbohAssessment,
     OpbohAssessmentStatus,
+    OpbohDomain,
     OpbohFinding,
     OpbohFrameworkVersion,
     OpbohResponse,
@@ -167,6 +171,32 @@ async def get_assessment(
     assessment_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 ) -> OpbohAssessment:
     return await _get_assessment_or_404(db, assessment_id)
+
+
+@router.get(
+    "/framework-versions/{framework_version_id}/catalogue",
+    response_model=list[DomainWithQuestionsOut],
+)
+async def get_catalogue(
+    framework_version_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+) -> list[OpbohDomain]:
+    """The catalogue's own definition — every domain and question a
+    framework version actually has, in display order. Nothing exposed this
+    before `apps/web` needed it: `compute_assessment_score` (the `/score`
+    route) reads the same rows internally, but only ever returns *scored*
+    results, which don't exist yet for a question nobody's answered."""
+    version = await db.get(OpbohFrameworkVersion, framework_version_id)
+    if version is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"No OPBOH framework version {framework_version_id}."
+        )
+    result = await db.execute(
+        select(OpbohDomain)
+        .options(selectinload(OpbohDomain.questions))
+        .where(OpbohDomain.framework_version_id == framework_version_id)
+        .order_by(OpbohDomain.sequence)
+    )
+    return list(result.scalars().unique().all())
 
 
 @router.get("/assessments/{assessment_id}/score", response_model=ScoreOut)
@@ -349,6 +379,26 @@ async def decide_route(
         assurance_score=result.assurance_score,
         decision_summary=body.decision_summary,
         correlation_id=uuid.uuid4(),
+    )
+    await db.commit()
+    await db.refresh(assessment)
+    return assessment
+
+
+@router.post("/assessments/{assessment_id}/reopen", response_model=AssessmentOut)
+async def reopen_assessment_route(
+    assessment_id: uuid.UUID,
+    body: ReopenAssessmentRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> OpbohAssessment:
+    """Only reachable from ACCEPTED/CONDITIONALLY_ACCEPTED/REJECTED — the
+    `IllegalTransition` `opboh_workflow.reopen_assessment` raises otherwise
+    (a missing reason, or an assessment that was never decided) is handled
+    globally (`main.py`), not caught here."""
+    assessment = await _get_assessment_or_404(db, assessment_id)
+    await opboh_workflow.reopen_assessment(
+        db, assessment, reason=body.reason, actor=user.object_id, correlation_id=uuid.uuid4()
     )
     await db.commit()
     await db.refresh(assessment)

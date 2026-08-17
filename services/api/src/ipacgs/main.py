@@ -3,9 +3,19 @@
 import logging
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from ipacgs.api.routes import evidence, framework, gate, health, notification, opboh, project
+from ipacgs.api.routes import (
+    evidence,
+    framework,
+    gate,
+    health,
+    notification,
+    opboh,
+    organisation,
+    project,
+)
 from ipacgs.core.config import get_settings
 from ipacgs.core.security import MakerCheckerViolation
 from ipacgs.services.evidence import IllegalEvidenceTransition
@@ -24,6 +34,21 @@ app = FastAPI(
     version="0.7.0",
 )
 
+if settings.is_local:
+    # apps/web's Next.js dev server (localhost:3000) is a different origin
+    # than this API (localhost:8000) — browsers block that without CORS
+    # regardless of environment. Scoped to is_local for the same reason
+    # core/security.py's dev-auth bypass is: every deployed environment
+    # sets ENVIRONMENT explicitly (infra/bicep/), never "local", so this
+    # never applies outside a developer's own machine.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
 app.include_router(health.router)
 app.include_router(opboh.router)
 app.include_router(evidence.router)
@@ -31,6 +56,7 @@ app.include_router(framework.router)
 app.include_router(project.router)
 app.include_router(gate.router)
 app.include_router(notification.router)
+app.include_router(organisation.router)
 
 
 # Domain exceptions get their own status codes here, once, rather than

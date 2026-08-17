@@ -16,6 +16,38 @@ from ipacgs.models.opboh import (
 )
 
 
+class QuestionOut(BaseModel):
+    """The catalogue's own question definition — distinct from `ResponseOut`
+    (an assessment's answer to one) and `DomainResultOut` (a scored
+    rollup). Needed so a client can discover what to ask before anything's
+    been answered yet — nothing exposed this before `apps/web` needed it."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    domain_id: uuid.UUID
+    control_objective: str
+    question_text: str
+    sequence: int
+    is_critical_control: bool
+    pass_threshold: float
+    evidence_type_hint: str | None
+
+
+class DomainWithQuestionsOut(BaseModel):
+    """Not `from_attributes` — `questions` needs its own nested schema
+    conversion, same reasoning `ProjectSummaryOut` documents for building
+    a response by hand from several pieces."""
+
+    id: uuid.UUID
+    code: str
+    name: str
+    sequence: int
+    weight: float
+    min_score_threshold: float
+    questions: list[QuestionOut]
+
+
 class CreateAssessmentRequest(BaseModel):
     organisation_id: uuid.UUID
     framework_version_id: uuid.UUID | None = Field(
@@ -75,6 +107,13 @@ class ResponseOut(BaseModel):
 class DecideRequest(BaseModel):
     decision: Literal["accepted", "conditionally_accepted", "rejected"]
     decision_summary: str | None = None
+
+
+class ReopenAssessmentRequest(BaseModel):
+    reason: str = Field(
+        description="Required — withdrawing confidence in an already-decided assessment "
+        "can never be silent or unexplained."
+    )
 
 
 class CriticalFailureOut(BaseModel):

@@ -20,17 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ipacgs.core.security import CurrentUser, get_current_user
 from ipacgs.main import app
-from ipacgs.models.opboh import (
-    OpbohAssessment,
-    OpbohAssessmentStatus,
-    OpbohDomain,
-    OpbohFrameworkVersion,
-    OpbohQuestion,
-)
+from ipacgs.models.opboh import OpbohDomain, OpbohFrameworkVersion, OpbohQuestion
 from ipacgs.models.organisation import Organisation
 from ipacgs.models.project import Project, ProjectStatus, Stage
 from ipacgs.models.tenant import Tenant
-from ipacgs.services import opboh_workflow
 
 
 def _as(object_id: str) -> None:
@@ -302,16 +295,11 @@ async def test_redeciding_a_still_failing_control_does_not_duplicate_the_finding
     client: AsyncClient,
     organisation: Organisation,
     catalogue: tuple[OpbohFrameworkVersion, OpbohQuestion, OpbohQuestion],
-    db_session: AsyncSession,
 ) -> None:
     """opboh_workflow._create_findings_for_critical_failures's own
     idempotency claim, exercised for real: decide() a second time on the
-    same still-failing control (via a reopen — REOPENED -> DRAFT is the
-    only way back to a decidable state, and there's no HTTP route for that
-    yet, so this drives it directly through the service layer, same as
-    every other place in this suite that reaches past a genuine, separate,
-    pre-existing gap in route coverage) must not create a second finding
-    for the same underlying problem."""
+    same still-failing control, via a real reopen over HTTP, must not
+    create a second finding for the same underlying problem."""
     _version, critical_q, ordinary_q = catalogue
 
     _as("alice")
@@ -352,27 +340,12 @@ async def test_redeciding_a_still_failing_control_does_not_duplicate_the_finding
     first_findings = await client.get(f"/opboh/assessments/{assessment_id}/findings")
     assert len(first_findings.json()) == 1
 
-    # No reopen-assessment route exists yet (a separate, real gap — see
-    # api/routes/opboh.py) — reached directly through the service layer,
-    # same session-commits-for-real reasoning every other direct db_session
-    # use in this file already documents.
-    assessment = await db_session.get(OpbohAssessment, uuid.UUID(assessment_id))
-    assert assessment is not None
-    await opboh_workflow.simple_transition(
-        db_session,
-        assessment,
-        target=OpbohAssessmentStatus.REOPENED,
-        actor="dave",
-        correlation_id=uuid.uuid4(),
+    reopen_resp = await client.post(
+        f"/opboh/assessments/{assessment_id}/reopen",
+        json={"reason": "Sponsor disputes the finding — revisiting before it stands."},
     )
-    await opboh_workflow.simple_transition(
-        db_session,
-        assessment,
-        target=OpbohAssessmentStatus.DRAFT,
-        actor="dave",
-        correlation_id=uuid.uuid4(),
-    )
-    await db_session.commit()
+    assert reopen_resp.status_code == 200, reopen_resp.text
+    assert reopen_resp.json()["status"] == "draft"
 
     await client.post(f"/opboh/assessments/{assessment_id}/submit")
     _as("bob")
@@ -388,6 +361,68 @@ async def test_redeciding_a_still_failing_control_does_not_duplicate_the_finding
 
     second_findings = await client.get(f"/opboh/assessments/{assessment_id}/findings")
     assert len(second_findings.json()) == 1  # still one, not two
+
+
+async def test_reopen_requires_a_reason(
+    client: AsyncClient,
+    organisation: Organisation,
+    catalogue: tuple[OpbohFrameworkVersion, OpbohQuestion, OpbohQuestion],
+) -> None:
+    _version, critical_q, ordinary_q = catalogue
+
+    _as("alice")
+    create_resp = await client.post(
+        "/opboh/assessments", json={"organisation_id": str(organisation.id)}
+    )
+    assessment_id = create_resp.json()["id"]
+    for q in (critical_q, ordinary_q):
+        await client.post(
+            f"/opboh/assessments/{assessment_id}/responses",
+            json={
+                "question_id": str(q.id),
+                "response_value": "yes",
+                "score": 5,
+                "evidence_sufficiency_factor": 1.0,
+            },
+        )
+    await client.post(f"/opboh/assessments/{assessment_id}/submit")
+    _as("bob")
+    await client.post(f"/opboh/assessments/{assessment_id}/begin-assessment")
+    _as("carol")
+    await client.post(f"/opboh/assessments/{assessment_id}/independently-review")
+    _as("dave")
+    await client.post(f"/opboh/assessments/{assessment_id}/decide", json={"decision": "accepted"})
+
+    resp = await client.post(f"/opboh/assessments/{assessment_id}/reopen", json={"reason": "  "})
+    assert resp.status_code == 409
+
+    project_resp = await client.get(f"/opboh/assessments/{assessment_id}")
+    assert project_resp.json()["status"] == "accepted"  # untouched
+
+
+async def test_reopening_an_undecided_assessment_is_409(
+    client: AsyncClient,
+    organisation: Organisation,
+    catalogue: tuple[OpbohFrameworkVersion, OpbohQuestion, OpbohQuestion],
+) -> None:
+    _as("alice")
+    create_resp = await client.post(
+        "/opboh/assessments", json={"organisation_id": str(organisation.id)}
+    )
+    assessment_id = create_resp.json()["id"]
+
+    resp = await client.post(
+        f"/opboh/assessments/{assessment_id}/reopen", json={"reason": "Nothing to reopen yet."}
+    )
+    assert resp.status_code == 409
+
+
+async def test_reopen_for_an_unknown_assessment_is_404(client: AsyncClient) -> None:
+    _as("alice")
+    resp = await client.post(
+        f"/opboh/assessments/{uuid.uuid4()}/reopen", json={"reason": "Doesn't matter."}
+    )
+    assert resp.status_code == 404
 
 
 async def test_create_finding_manually_over_http(
