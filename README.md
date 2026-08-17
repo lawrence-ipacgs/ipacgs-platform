@@ -57,11 +57,27 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   (`services/opboh_scoring.py`), the assessment state machine and
   segregation-of-duties enforcement (`services/opboh_workflow.py`), findings,
   and 18 HTTP routes exposing all of it (`api/routes/opboh.py`,
-  `api/routes/evidence.py`). The catalogue content is still an
-  **illustrative placeholder**, not KMI Africa's real OPBOH question bank —
-  see `scripts/seed_opboh_catalogue.py`'s docstring. The *scoring* is real,
-  though: a Yes/No/N-A response type, a 0-5 score, a per-response Evidence
-  Sufficiency Factor (0.5-1.0), and a real Assurance Score formula
+  `api/routes/evidence.py`). The catalogue is no longer purely illustrative:
+  `scripts/seed_opboh_real_catalogue.py` seeds the **real** 37-domain,
+  222-question OPBOH structure (WP01-WP37, six lifecycle clusters), sourced
+  from two KMI-shared controlled registers (`docs/`), and deactivates the
+  old 4-domain/8-question placeholder (`seed_opboh_catalogue.py`, kept in
+  place — existing assessments still reference it by ID). Domain names and
+  each question's control objective are real, sourced content; the
+  question *wording* is this codebase's own synthesis, deliberately not
+  the register's actual 3,700-question bank (that bank is generated
+  per-project — every one of its questions names one specific real
+  development throughout, which this catalogue is not). 12 of the 222
+  fields and one domain name also needed generalising — the register
+  named that same project's actual anchor retailer, fuel brand, road
+  number and site size directly in a handful of fields; see
+  `seed_opboh_real_catalogue.py`'s module docstring for the exact list and
+  reasoning. `is_critical_control` marks one placeholder critical control
+  per domain (37 total) since the register never marks question-level
+  criticality anywhere — a documented placeholder, not a KMI-confirmed
+  determination. The *scoring* is real, though: a Yes/No/N-A response type,
+  a 0-5 score, a per-response Evidence Sufficiency Factor (0.5-1.0), and a
+  real Assurance Score formula
   (`weighted score x evidence factor`, banded >=80 Green / 60-79 Amber /
   <60 Red, any critical failure forcing automatic Red) — sourced from an
   OPBOH Full-Cycle Assessment Module v1.1 overview KMI shared (`docs/`).

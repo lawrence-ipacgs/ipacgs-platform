@@ -243,6 +243,14 @@ async def test_advance_stage_rejects_an_unaccepted_assessment(
     )
     assert advance_resp.status_code == 409
 
+    # Committed and never deactivated until now — same leak two_stages'
+    # own docstring already warns about for Stage rows, just never fixed
+    # here for this OpbohFrameworkVersion. Left active, it's exactly the
+    # kind of leftover row that later breaks "pick the active version" /
+    # "count the active versions" logic elsewhere in the suite.
+    version.is_active = False
+    await db_session.commit()
+
 
 async def test_advance_stage_for_an_unknown_assessment_is_404(
     client: AsyncClient, organisation: Organisation, two_stages: tuple[Stage, Stage]
