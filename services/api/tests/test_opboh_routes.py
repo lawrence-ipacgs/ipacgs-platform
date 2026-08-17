@@ -20,10 +20,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ipacgs.core.security import CurrentUser, get_current_user
 from ipacgs.main import app
-from ipacgs.models.opboh import OpbohDomain, OpbohFrameworkVersion, OpbohQuestion
+from ipacgs.models.opboh import (
+    OpbohAssessment,
+    OpbohAssessmentStatus,
+    OpbohDomain,
+    OpbohFrameworkVersion,
+    OpbohQuestion,
+)
 from ipacgs.models.organisation import Organisation
 from ipacgs.models.project import Project, ProjectStatus, Stage
 from ipacgs.models.tenant import Tenant
+from ipacgs.services import opboh_workflow
 
 
 def _as(object_id: str) -> None:
@@ -231,13 +238,10 @@ async def test_bill_of_health_names_the_critical_failure(
     organisation: Organisation,
     catalogue: tuple[OpbohFrameworkVersion, OpbohQuestion, OpbohQuestion],
 ) -> None:
-    """A critical-control failure shows up in the opinion's rag/narrative.
-    It does NOT currently also appear in open_findings — nothing in this
-    codebase calls opboh_findings.create_finding yet, for a critical
-    failure or anything else, and there's no route to create one by hand
-    either (only assign/close/escalate on a finding that already exists).
-    That's a separate, real gap this report doesn't paper over: it reports
-    open_findings exactly as empty as they actually are."""
+    """A critical-control failure shows up in the opinion's rag/narrative
+    AND as a real finding in open_findings — opboh_workflow.decide() now
+    creates one (services/opboh_workflow.py's own module docstring), not
+    just a number this report used to report alone."""
     _version, critical_q, ordinary_q = catalogue
 
     _as("alice")
@@ -282,11 +286,163 @@ async def test_bill_of_health_names_the_critical_failure(
     assert body["opinion"]["rag"] == "red"
     assert body["opinion"]["recommendation"] == "Do Not Proceed"
     assert critical_q.control_objective in body["opinion"]["narrative"]
-    assert body["open_findings"] == []  # see docstring above — a real, separate gap
+    assert len(body["open_findings"]) == 1
+    finding = body["open_findings"][0]
+    assert finding["severity"] == "critical"
+    assert critical_q.control_objective in finding["description"]
+    assert finding["status"] == "open"
 
 
 async def test_bill_of_health_for_an_unknown_assessment_is_404(client: AsyncClient) -> None:
     resp = await client.get(f"/opboh/assessments/{uuid.uuid4()}/bill-of-health")
+    assert resp.status_code == 404
+
+
+async def test_redeciding_a_still_failing_control_does_not_duplicate_the_finding(
+    client: AsyncClient,
+    organisation: Organisation,
+    catalogue: tuple[OpbohFrameworkVersion, OpbohQuestion, OpbohQuestion],
+    db_session: AsyncSession,
+) -> None:
+    """opboh_workflow._create_findings_for_critical_failures's own
+    idempotency claim, exercised for real: decide() a second time on the
+    same still-failing control (via a reopen — REOPENED -> DRAFT is the
+    only way back to a decidable state, and there's no HTTP route for that
+    yet, so this drives it directly through the service layer, same as
+    every other place in this suite that reaches past a genuine, separate,
+    pre-existing gap in route coverage) must not create a second finding
+    for the same underlying problem."""
+    _version, critical_q, ordinary_q = catalogue
+
+    _as("alice")
+    create_resp = await client.post(
+        "/opboh/assessments", json={"organisation_id": str(organisation.id)}
+    )
+    assessment_id = create_resp.json()["id"]
+
+    await client.post(
+        f"/opboh/assessments/{assessment_id}/responses",
+        json={
+            "question_id": str(critical_q.id),
+            "response_value": "no",
+            "score": 0,
+            "evidence_sufficiency_factor": 1.0,
+        },
+    )
+    await client.post(
+        f"/opboh/assessments/{assessment_id}/responses",
+        json={
+            "question_id": str(ordinary_q.id),
+            "response_value": "yes",
+            "score": 5,
+            "evidence_sufficiency_factor": 1.0,
+        },
+    )
+    await client.post(f"/opboh/assessments/{assessment_id}/submit")
+    _as("bob")
+    await client.post(f"/opboh/assessments/{assessment_id}/begin-assessment")
+    _as("carol")
+    await client.post(f"/opboh/assessments/{assessment_id}/independently-review")
+    _as("dave")
+    await client.post(
+        f"/opboh/assessments/{assessment_id}/decide",
+        json={"decision": "conditionally_accepted", "decision_summary": "Pending fix."},
+    )
+
+    first_findings = await client.get(f"/opboh/assessments/{assessment_id}/findings")
+    assert len(first_findings.json()) == 1
+
+    # No reopen-assessment route exists yet (a separate, real gap — see
+    # api/routes/opboh.py) — reached directly through the service layer,
+    # same session-commits-for-real reasoning every other direct db_session
+    # use in this file already documents.
+    assessment = await db_session.get(OpbohAssessment, uuid.UUID(assessment_id))
+    assert assessment is not None
+    await opboh_workflow.simple_transition(
+        db_session,
+        assessment,
+        target=OpbohAssessmentStatus.REOPENED,
+        actor="dave",
+        correlation_id=uuid.uuid4(),
+    )
+    await opboh_workflow.simple_transition(
+        db_session,
+        assessment,
+        target=OpbohAssessmentStatus.DRAFT,
+        actor="dave",
+        correlation_id=uuid.uuid4(),
+    )
+    await db_session.commit()
+
+    await client.post(f"/opboh/assessments/{assessment_id}/submit")
+    _as("bob")
+    await client.post(f"/opboh/assessments/{assessment_id}/begin-assessment")
+    _as("carol")
+    await client.post(f"/opboh/assessments/{assessment_id}/independently-review")
+    _as("dave")
+    second_decide = await client.post(
+        f"/opboh/assessments/{assessment_id}/decide",
+        json={"decision": "conditionally_accepted", "decision_summary": "Still pending."},
+    )
+    assert second_decide.status_code == 200, second_decide.text
+
+    second_findings = await client.get(f"/opboh/assessments/{assessment_id}/findings")
+    assert len(second_findings.json()) == 1  # still one, not two
+
+
+async def test_create_finding_manually_over_http(
+    client: AsyncClient,
+    organisation: Organisation,
+    catalogue: tuple[OpbohFrameworkVersion, OpbohQuestion, OpbohQuestion],
+) -> None:
+    _as("alice")
+    create_resp = await client.post(
+        "/opboh/assessments", json={"organisation_id": str(organisation.id)}
+    )
+    assessment_id = create_resp.json()["id"]
+
+    resp = await client.post(
+        f"/opboh/assessments/{assessment_id}/findings",
+        json={"severity": "medium", "description": "Borderline answer, needs follow-up."},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["severity"] == "medium"
+    assert body["status"] == "open"
+    assert body["response_id"] is None
+
+    list_resp = await client.get(f"/opboh/assessments/{assessment_id}/findings")
+    assert len(list_resp.json()) == 1
+
+
+async def test_create_finding_for_an_unknown_response_is_404(
+    client: AsyncClient,
+    organisation: Organisation,
+    catalogue: tuple[OpbohFrameworkVersion, OpbohQuestion, OpbohQuestion],
+) -> None:
+    _as("alice")
+    create_resp = await client.post(
+        "/opboh/assessments", json={"organisation_id": str(organisation.id)}
+    )
+    assessment_id = create_resp.json()["id"]
+
+    resp = await client.post(
+        f"/opboh/assessments/{assessment_id}/findings",
+        json={
+            "severity": "low",
+            "description": "Refers to a response that doesn't exist.",
+            "response_id": str(uuid.uuid4()),
+        },
+    )
+    assert resp.status_code == 404
+
+
+async def test_create_finding_for_an_unknown_assessment_is_404(client: AsyncClient) -> None:
+    _as("alice")
+    resp = await client.post(
+        f"/opboh/assessments/{uuid.uuid4()}/findings",
+        json={"severity": "low", "description": "Doesn't matter."},
+    )
     assert resp.status_code == 404
 
 
