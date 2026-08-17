@@ -56,7 +56,7 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   the versioned/configurable catalogue, the scoring engine
   (`services/opboh_scoring.py`), the assessment state machine and
   segregation-of-duties enforcement (`services/opboh_workflow.py`), findings,
-  and 19 HTTP routes exposing all of it (`api/routes/opboh.py`,
+  and 20 HTTP routes exposing all of it (`api/routes/opboh.py`,
   `api/routes/evidence.py`). The catalogue is no longer purely illustrative:
   `scripts/seed_opboh_real_catalogue.py` seeds the **real** 37-domain,
   222-question OPBOH structure (WP01-WP37, six lifecycle clusters), sourced
@@ -98,7 +98,14 @@ Interactive API docs once it's running: `http://localhost:8000/docs`.
   findings` lets a reviewer create one by hand for anything that isn't a
   critical-control failure at all. `services/opboh_findings.py`'s
   `create_finding` — written back in Epic 3, never called until now — is
-  what both paths actually call.
+  what both paths actually call. `POST /opboh/assessments/{id}/reopen`
+  closes the matching gap that surfaced testing the finding idempotency
+  above: the state machine has always allowed moving an ACCEPTED/
+  CONDITIONALLY_ACCEPTED/REJECTED assessment back through REOPENED to
+  DRAFT, but nothing exposed it. Requires a reason, same as
+  `stage_engine.reopen_stage`'s own convention — `opboh_workflow.
+  simple_transition` now refuses that target outright so the reason
+  requirement can't be routed around.
 - **Epic 4 — Framework Registry**: a generic `Framework`/`FrameworkVersion`
   registry (`models/framework.py`, `services/framework_registry.py`,
   `api/routes/framework.py`) that OPBOH is now registered *into* rather than
